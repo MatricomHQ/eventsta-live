@@ -503,7 +503,7 @@ export const getEventsByHost = async (hostId: string): Promise<Event[]> => {
 // --- TICKETING & ORDERS ---
 
 export const purchaseTicket = async (userId: string, eventId: string, cart: CheckoutCart, recipientUserId?: string, promoCode?: string, fees?: any): Promise<void> => {
-    console.info(`[ACTION] purchaseTicket: User ${userId} purchasing for Event ${eventId}`);
+    console.debug(`[Promo Debug] 🛒 API purchaseTicket. User: ${userId}, Event: ${eventId}, Promo: ${promoCode || 'None'}`);
     await request<any>('/orders/checkout', {
         method: 'POST',
         body: JSON.stringify({ event_id: eventId, items: cart, recipient_user_id: recipientUserId, promo_code: promoCode, fees })
@@ -863,11 +863,13 @@ export const createPromoCode = (userId: string, eventId: string, data: any) => {
     return request<PromoCode>(`/events/${eventId}/promocodes`, { method: 'POST', body: JSON.stringify(data) });
 };
 export const validatePromoCode = async (eventId: string, code: string): Promise<{ valid: boolean, discountPercent: number, code: string }> => {
-    console.info(`[ACTION] validatePromoCode: ${code} for ${eventId}`);
-    return await request<{ valid: boolean, discountPercent: number, code: string }>(`/events/${eventId}/promocodes/validate`, {
+    console.debug(`[Promo Debug] 🔍 API validatePromoCode request: Code '${code}' for Event '${eventId}'`);
+    const res = await request<{ valid: boolean, discountPercent: number, code: string }>(`/events/${eventId}/promocodes/validate`, {
         method: 'POST',
         body: JSON.stringify({ code })
     });
+    console.debug(`[Promo Debug] ✅ API validatePromoCode response:`, res);
+    return res;
 };
 export const deletePromoCode = (userId: string, eventId: string, codeId: string) => {
     console.info(`[ACTION] deletePromoCode: ${codeId}`);
@@ -992,7 +994,7 @@ export const finalizeCompetition = (userId: string, eventId: string, compId: str
 
 // NEW: Track Promo Link Click
 export const trackPromoClick = async (eventId: string, code: string): Promise<void> => {
-    console.info(`[ACTION] trackPromoClick: ${code} for ${eventId}`);
+    console.debug(`[Promo Debug] 🖱️ API trackPromoClick: Code '${code}' for Event '${eventId}'`);
     // Fire and forget, no return value needed for frontend logic
     request(`/promotions/track-click`, {
         method: 'POST',

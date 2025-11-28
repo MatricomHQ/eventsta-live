@@ -153,22 +153,28 @@ const EventDetails: React.FC = () => {
   useEffect(() => {
       const handlePromoLogic = async () => {
           if (!event) return;
+          console.debug("[Promo Debug] 🔗 URL Parameter Check. Search:", location.search);
           const searchParams = new URLSearchParams(location.search);
           const urlPromo = searchParams.get('promo');
           
           if (urlPromo) {
+              console.debug("[Promo Debug] 🎯 Found promo code in URL:", urlPromo);
               // Store tracking code regardless of validation status
               setUrlTrackingCode(urlPromo);
 
               // 1. Track Click (Fire and Forget - do not wait for validation)
               if (trackPromoRef.current !== urlPromo) {
+                  console.debug(`[Promo Debug] Tracking click for code: ${urlPromo}`);
                   api.trackPromoClick(event.id, urlPromo).catch(e => console.warn("Failed to track promo click", e));
                   trackPromoRef.current = urlPromo;
               }
               
               try {
                   // 2. Validate Code (for Discount Logic)
+                  console.debug(`[Promo Debug] ⏳ Validating URL code '${urlPromo}' against event '${event.id}'...`);
                   const result = await api.validatePromoCode(event.id, urlPromo);
+                  console.debug("[Promo Debug] 🏁 Validation Result:", result);
+                  
                   if (result.valid) {
                       setAppliedPromoCode({
                           id: 'validated-code',
@@ -188,6 +194,8 @@ const EventDetails: React.FC = () => {
                   // Ignore validation error from URL param
                   console.warn("Promo validation failed from URL", e);
               }
+          } else {
+              console.debug("[Promo Debug] ⚪ No promo code found in URL.");
           }
       };
       handlePromoLogic();
@@ -377,6 +385,8 @@ const EventDetails: React.FC = () => {
     setAppliedPromoCode(null);
     
     if (!promoCodeInput) return;
+    
+    console.debug(`[Promo Debug] ✍️ Manual Promo Entry: '${promoCodeInput}'`);
 
     try {
         // Use the new public validation endpoint

@@ -30,6 +30,7 @@ const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose, cart, ev
       if (isOpen) {
           setView('checkout');
           setErrorMessage('');
+          console.debug("[Promo Debug] 💳 CheckoutModal Open. Props - PromoCode:", promoCode, "Discount:", appliedDiscountPercent);
           api.getSystemSettings().then(settings => {
               let percent = 5.9;
               let fixed = 0.35;
@@ -46,7 +47,7 @@ const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose, cart, ev
               // Defaults are already set in useState
           });
       }
-  }, [isOpen]);
+  }, [isOpen, promoCode, appliedDiscountPercent]);
 
   const { items, subtotal, discount, mandatoryFees, finalTotal } = useMemo(() => {
     const isFundraiser = event.type === 'fundraiser';
@@ -93,12 +94,16 @@ const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose, cart, ev
     
     let discountAmount = 0;
     if (appliedDiscountPercent && event.type === 'ticketed') {
+        console.debug(`[Promo Debug] 🧮 Calculating discount. Percent: ${appliedDiscountPercent}%`);
         // Apply discount ONLY to tickets, NOT add-ons
         const ticketSubtotal = cartItems
             .filter(item => item.isTicket)
             .reduce((sum, item) => sum + item.subtotal, 0);
             
         discountAmount = ticketSubtotal * (appliedDiscountPercent / 100);
+        console.debug(`[Promo Debug] 📉 Discount amount: ${discountAmount}`);
+    } else {
+        console.debug("[Promo Debug] 🚫 No discount applied in calculation logic.");
     }
     
     const subtotalAfterDiscount = calculatedSubtotal - discountAmount;
