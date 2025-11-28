@@ -27,7 +27,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     } catch (error) {
       console.error("Login failed", error);
       setUser(null);
-      return null;
+      throw error;
     } finally {
       setIsLoading(false);
     }

@@ -187,7 +187,10 @@ const AdminDashboard: React.FC = () => {
     const [stats, setStats] = useState({ totalUsers: 0, totalEvents: 0, grossVolume: 0, platformFees: 0 });
     
     useEffect(() => {
-        api.getSystemStats().then(setStats);
+        api.getSystemStats().then(setStats).catch(() => {
+            // Fallback is handled in api.getSystemStats but extra catch here just in case
+            setStats({ totalUsers: 0, totalEvents: 0, grossVolume: 0, platformFees: 0 });
+        });
     }, []);
 
     return (
@@ -198,10 +201,10 @@ const AdminDashboard: React.FC = () => {
             </div>
             
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
-                <StatCard label="Total Users" value={stats.totalUsers.toLocaleString()} icon={UsersIcon} color="blue" />
-                <StatCard label="Total Events" value={stats.totalEvents.toLocaleString()} icon={CalendarIcon} color="purple" />
-                <StatCard label="Gross Volume" value={`$${stats.grossVolume.toLocaleString()}`} icon={DollarSignIcon} color="green" />
-                <StatCard label="Platform Fees" value={`$${stats.platformFees.toLocaleString()}`} icon={ActivityIcon} color="yellow" />
+                <StatCard label="Total Users" value={stats?.totalUsers?.toLocaleString() ?? '0'} icon={UsersIcon} color="blue" />
+                <StatCard label="Total Events" value={stats?.totalEvents?.toLocaleString() ?? '0'} icon={CalendarIcon} color="purple" />
+                <StatCard label="Gross Volume" value={`$${stats?.grossVolume?.toLocaleString() ?? '0'}`} icon={DollarSignIcon} color="green" />
+                <StatCard label="Platform Fees" value={`$${stats?.platformFees?.toLocaleString() ?? '0'}`} icon={ActivityIcon} color="yellow" />
             </div>
 
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-8">

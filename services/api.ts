@@ -43,7 +43,11 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     const method = options.method || 'GET';
     const timestamp = new Date().toISOString().split('T')[1].slice(0, -1); // HH:mm:ss.sss
 
+    // LOGGING: REQUEST
     console.log(`[${timestamp}] 📡 [API REQ] ${method} ${url}`);
+    if (options.body) {
+        console.log("TX Data:", options.body);
+    }
     
     // Check for mixed content issues early
     const isMixedContent = typeof window !== 'undefined' && window.location.protocol === 'https:' && url.startsWith('http:');
@@ -54,25 +58,38 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
         }
 
         const response = await fetch(url, { ...options, headers });
-        console.log(`[${timestamp}] 📥 [API RES] ${response.status} ${url}`);
-
         const text = await response.text();
+
+        // LOGGING: RESPONSE
+        console.log(`[${timestamp}] 📥 [API RES] ${response.status} ${url}`);
+        if (text) {
+             console.log("RX Data:", text);
+        }
 
         if (!response.ok) {
             let errorMessage = `HTTP Error: ${response.status} ${response.statusText}`;
+            let data;
             try {
                 // Try to parse JSON error message from backend (e.g. {"error": "Unauthorized"})
-                const errorJson = JSON.parse(text);
-                if (errorJson.error) errorMessage = errorJson.error;
-                else if (errorJson.message) errorMessage = errorJson.message;
+                if (text) {
+                    data = JSON.parse(text);
+                    if (data.error) errorMessage = data.error;
+                    else if (data.message) errorMessage = data.message;
+                }
             } catch (e) {
                 // If not JSON, use the raw text if available
-                if (text) errorMessage = text;
+                if (text && text.length < 200) errorMessage = text;
             }
             throw new Error(errorMessage);
         }
 
-        return text ? JSON.parse(text) : {};
+        let data;
+        try {
+            data = text ? JSON.parse(text) : {};
+        } catch(e) {
+            data = {};
+        }
+        return data as T;
     } catch (error: any) {
         const timestampErr = new Date().toISOString().split('T')[1].slice(0, -1);
         let failureReason = error.message || 'Unknown Error';
@@ -114,9 +131,16 @@ export const checkUserExists = async (email: string): Promise<boolean> => {
 
 export const registerUser = async (email: string, name: string, role: 'attendee' | 'host', password?: string): Promise<User> => {
     console.info(`[ACTION] registerUser: Registering ${email} as ${role}`);
+    // SECURITY FIX: Always send role as 'USER'. Do not allow frontend to request 'ADMIN'.
+    // Hosts are just users who have created a host profile.
     const res = await request<any>('/auth/register', {
         method: 'POST',
-        body: JSON.stringify({ email, password: password || 'placeholder123', name, role: role === 'host' ? 'ADMIN' : 'USER' })
+        body: JSON.stringify({ 
+            email, 
+            password: password || 'placeholder123', 
+            name, 
+            role: 'USER' // Enforce USER role
+        })
     });
     if (res.token) setToken(res.token);
     return mapApiUserToFrontend(res.user);
@@ -125,12 +149,35 @@ export const registerUser = async (email: string, name: string, role: 'attendee'
 export const signIn = async (provider: string, credentials?: string): Promise<User> => {
     console.info(`[ACTION] signIn: Provider ${provider}`);
     if (provider === 'demo' || provider === 'admin') {
-        const mockUser = { ...MOCK_USER, isSystemAdmin: provider === 'admin', id: provider === 'admin' ? 'admin_id' : 'demo_id', name: provider === 'admin' ? 'System Admin' : 'Demo User' };
+        const mockUser = { 
+            ...MOCK_USER, 
+            isSystemAdmin: provider === 'admin', 
+            id: provider === 'admin' ? 'admin_id' : 'demo_id', 
+            name: provider === 'admin' ? 'System Admin' : 'Demo User',
+            role: provider === 'admin' ? 'SUPER_ADMIN' : 'USER'
+        };
         return mapApiUserToFrontend(mockUser);
     }
+
+    let bodyPayload: any = {};
+    
+    if (provider === 'email' && credentials) {
+        const parts = credentials.split('|');
+        const email = parts[0];
+        // Join back the rest in case password contains pipes
+        const password = parts.slice(1).join('|'); 
+        bodyPayload = { email, password };
+    } else {
+        // Provider flow (e.g. google-one-tap)
+        bodyPayload = { 
+            password: 'placeholder-provider-login', 
+            provider_token: credentials 
+        };
+    }
+
     const res = await request<any>('/auth/login', {
         method: 'POST',
-        body: JSON.stringify({ email: provider === 'email' ? credentials?.split('|')[0] : undefined, password: 'password', provider_token: provider !== 'email' ? credentials : undefined }) 
+        body: JSON.stringify(bodyPayload) 
     });
     if (res.token) setToken(res.token);
     return mapApiUserToFrontend(res.user);
@@ -275,7 +322,14 @@ export const createHostReview = async (hostId: string, review: any): Promise<voi
 
 export const getSystemStats = async () => { 
     console.info(`[ACTION] getSystemStats`);
-    return await request<any>('/admin/stats'); 
+    const raw = await request<any>('/admin/stats'); 
+    // Safely map snake_case or missing fields to ensure UI doesn't crash
+    return {
+        totalUsers: raw.totalUsers || raw.total_users || 0,
+        totalEvents: raw.totalEvents || raw.total_events || 0,
+        grossVolume: raw.grossVolume || raw.gross_volume || 0,
+        platformFees: raw.platformFees || raw.platform_fees || 0
+    };
 };
 export const getAllUsersAdmin = async (page: number, limit: number, search: string) => {
     console.info(`[ACTION] getAllUsersAdmin: Page ${page}`);
@@ -283,7 +337,23 @@ export const getAllUsersAdmin = async (page: number, limit: number, search: stri
 };
 export const getSystemSettings = async (): Promise<SystemSettings> => {
     console.info(`[ACTION] getSystemSettings`);
-    return await request<SystemSettings>('/system/settings');
+    const raw = await request<any>('/system/settings');
+    
+    // Helper to safely parse numbers and handle NaN/null/undefined
+    const parseNum = (val: any, fallback: number) => {
+        const n = parseFloat(val);
+        return isNaN(n) ? fallback : n;
+    };
+
+    // Map snake_case to camelCase
+    return {
+        platformName: raw.platformName || raw.platform_name || 'Eventsta',
+        supportEmail: raw.supportEmail || raw.support_email || '',
+        platformFeePercent: parseNum(raw.platformFeePercent ?? raw.platform_fee_percent, 5.9),
+        platformFeeFixed: parseNum(raw.platformFeeFixed ?? raw.platform_fee_fixed, 0.35),
+        maintenanceMode: !!(raw.maintenanceMode ?? raw.maintenance_mode),
+        disableRegistration: !!(raw.disableRegistration ?? raw.disable_registration),
+    };
 };
 export const updateSystemSettings = async (settings: SystemSettings): Promise<SystemSettings> => {
     console.info(`[ACTION] updateSystemSettings`);
@@ -311,6 +381,12 @@ function parseImages(input: any): string[] {
 }
 
 function mapApiUserToFrontend(apiUser: any, promoStats: PromoStat[] = [], payouts: Payout[] = []): User {
+    // STRICT SECURITY CHECK:
+    // Only map to System Admin if the backend explicitly sets the boolean flag `isSystemAdmin`
+    // or if the role is specifically 'SUPER_ADMIN'.
+    // Do NOT strictly trust `role: 'ADMIN'` as legacy/bad logic might set that for Hosts.
+    const isActuallyAdmin = apiUser.isSystemAdmin === true || apiUser.role === 'SUPER_ADMIN';
+
     return {
         id: apiUser.id,
         name: apiUser.name,
@@ -319,7 +395,7 @@ function mapApiUserToFrontend(apiUser: any, promoStats: PromoStat[] = [], payout
         purchasedTickets: apiUser.purchasedTickets || [],
         promoStats: promoStats,
         payouts: payouts,
-        isSystemAdmin: apiUser.role === 'ADMIN' || apiUser.isSystemAdmin,
+        isSystemAdmin: isActuallyAdmin,
         stripeConnected: apiUser.stripe_connected,
         stripeAccountId: apiUser.stripe_account_id,
         artistProfile: apiUser.artist_profile,

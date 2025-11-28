@@ -28,10 +28,20 @@ const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose, cart, ev
   useEffect(() => {
       if (isOpen) {
           api.getSystemSettings().then(settings => {
-              setFeesConfig({
-                  percent: settings.platformFeePercent,
-                  fixed: settings.platformFeeFixed
-              });
+              let percent = 5.9;
+              let fixed = 0.35;
+
+              if (typeof settings.platformFeePercent === 'number' && !isNaN(settings.platformFeePercent)) {
+                  percent = settings.platformFeePercent;
+              }
+              if (typeof settings.platformFeeFixed === 'number' && !isNaN(settings.platformFeeFixed)) {
+                  fixed = settings.platformFeeFixed;
+              }
+              
+              setFeesConfig({ percent, fixed });
+          }).catch(err => {
+              console.warn("Failed to load system settings, using defaults.", err);
+              // Defaults are already set in useState
           });
       }
   }, [isOpen]);

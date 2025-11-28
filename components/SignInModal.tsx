@@ -104,27 +104,26 @@ const SignInModal: React.FC<SignInModalProps> = ({ isOpen, onClose, context = 'd
                   const destination = await determineRedirectPath(user);
                   navigate(destination);
               }
-          } else {
-              // Login returned null/failed implies user likely doesn't exist
-              // Trigger registration flow
-              if (isApplication) {
-                  // SPECIAL FLOW: Auto-register for applications
-                  try {
-                      await api.registerUser(email, name, 'attendee');
-                      await login('google-one-tap', token);
-                      onClose();
-                  } catch (regError: any) {
-                      setError(regError.message || "Registration failed.");
-                  }
-              } else {
-                  // Trigger role selection flow for new users
-                  setPendingGoogleUser({ email, name, token });
-                  setShowRoleSelection(true);
-              }
           }
       } catch (error) {
-          console.error("Google Login Error", error);
-          setError('Google login failed. Please try again.');
+          // If login fails (throws), it implies user might not exist or token invalid.
+          // For Google Sign In flows, we assume it's a new user needing registration.
+          console.warn("Google login failed, attempting registration flow:", error);
+          
+          if (isApplication) {
+              // SPECIAL FLOW: Auto-register for applications
+              try {
+                  await api.registerUser(email, name, 'attendee');
+                  await login('google-one-tap', token);
+                  onClose();
+              } catch (regError: any) {
+                  setError(regError.message || "Registration failed.");
+              }
+          } else {
+              // Trigger role selection flow for new users
+              setPendingGoogleUser({ email, name, token });
+              setShowRoleSelection(true);
+          }
       }
   };
 
@@ -175,9 +174,8 @@ const SignInModal: React.FC<SignInModalProps> = ({ isOpen, onClose, context = 'd
               return;
           }
 
-          // 2. Try Login
-          await api.loginWithPassword(email, password);
-          const user = await login('email'); 
+          // 2. Try Login - pass full credentials to context login which calls api.signIn
+          const user = await login('email', `${email}|${password}`); 
           
           if (user) {
               onClose();
@@ -192,6 +190,7 @@ const SignInModal: React.FC<SignInModalProps> = ({ isOpen, onClose, context = 'd
           if (msg.includes('not found') || msg.includes('No user')) {
                setView('name_input');
           } else {
+               // This handles the "Invalid credentials" error from API
                setError('Incorrect email or password. Please try again.');
           }
       } finally {
@@ -210,7 +209,7 @@ const SignInModal: React.FC<SignInModalProps> = ({ isOpen, onClose, context = 'd
           try {
               // Auto-register for applications
               await api.registerUser(email, name, 'attendee', password);
-              await login('email');
+              await login('email', `${email}|${password}`);
               onClose();
           } catch (regError: any) {
               setError(regError.message || "Registration failed.");
@@ -234,8 +233,13 @@ const SignInModal: React.FC<SignInModalProps> = ({ isOpen, onClose, context = 'd
               onClose();
               
               if (user) {
-                  const destination = await determineRedirectPath(user);
-                  navigate(destination);
+                  // Explicitly check role intent for navigation
+                  if (role === 'host') {
+                      navigate('/events');
+                  } else {
+                      const destination = await determineRedirectPath(user);
+                      navigate(destination);
+                  }
               }
               return;
           }
@@ -243,15 +247,21 @@ const SignInModal: React.FC<SignInModalProps> = ({ isOpen, onClose, context = 'd
           // Handle Email/Password Flow
           if (pendingRegUser) {
               await api.registerUser(pendingRegUser.email, pendingRegUser.name, role, pendingRegUser.password);
-              const user = await login('email');
+              // Ensure we pass credentials to login so api.signIn sends the correct password
+              const user = await login('email', `${pendingRegUser.email}|${pendingRegUser.password}`);
               
               setPendingRegUser(null);
               setShowRoleSelection(false);
               onClose();
               
               if (user) {
-                  const destination = await determineRedirectPath(user);
-                  navigate(destination);
+                  // Explicitly check role intent for navigation
+                  if (role === 'host') {
+                      navigate('/events');
+                  } else {
+                      const destination = await determineRedirectPath(user);
+                      navigate(destination);
+                  }
               }
           }
       } catch (err: any) {
@@ -277,19 +287,27 @@ const SignInModal: React.FC<SignInModalProps> = ({ isOpen, onClose, context = 'd
   };
 
   const handleAdminLogin = async () => {
-      const user = await login('admin');
-      onClose();
-      if (user) {
-          navigate('/system-admin');
+      try {
+          const user = await login('admin');
+          onClose();
+          if (user) {
+              navigate('/system-admin');
+          }
+      } catch (error) {
+          setError("Admin login failed.");
       }
   }
 
   const handleDemoLogin = async () => {
-      const user = await login('demo');
-      onClose();
-      if (user && context === 'default') {
-          const destination = await determineRedirectPath(user);
-          navigate(destination);
+      try {
+          const user = await login('demo');
+          onClose();
+          if (user && context === 'default') {
+              const destination = await determineRedirectPath(user);
+              navigate(destination);
+          }
+      } catch (error) {
+          setError("Demo login failed.");
       }
   }
 
