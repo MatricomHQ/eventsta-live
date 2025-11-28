@@ -73,6 +73,7 @@ const SignInModal: React.FC<SignInModalProps> = ({ isOpen, onClose, context = 'd
   const [name, setName] = useState('');
   const [error, setError] = useState('');
   const [forgotPasswordSuccess, setForgotPasswordSuccess] = useState(false);
+  const [isCheckingUser, setIsCheckingUser] = useState(false);
 
   const isApplication = context === 'application';
 
@@ -88,6 +89,7 @@ const SignInModal: React.FC<SignInModalProps> = ({ isOpen, onClose, context = 'd
           setPendingRegUser(null);
           setShowRoleSelection(false);
           setForgotPasswordSuccess(false);
+          setIsCheckingUser(false);
       }
   }, [isOpen]);
 
@@ -152,11 +154,30 @@ const SignInModal: React.FC<SignInModalProps> = ({ isOpen, onClose, context = 'd
           return;
       }
 
+      setIsCheckingUser(true);
+
       try {
-          // Try Login with Password directly
+          // 1. Check if user exists
+          let userExists = false;
+          try {
+              userExists = await api.checkUserExists(email);
+          } catch (checkErr: any) {
+              // If we get a 404, it might strictly mean user not found depending on API implementation
+              // If we get network error, we default to trying login to be safe (let login endpoint handle auth)
+              console.warn("Check user failed", checkErr);
+              userExists = true; 
+          }
+
+          if (!userExists) {
+              setIsCheckingUser(false);
+              // Go to registration flow
+              setView('name_input');
+              return;
+          }
+
+          // 2. Try Login
           await api.loginWithPassword(email, password);
-          // Context update handled by api call setting token, but we need to refresh context user
-          const user = await login('email'); // 'email' provider just triggers profile fetch in updated context
+          const user = await login('email'); 
           
           if (user) {
               onClose();
@@ -166,21 +187,15 @@ const SignInModal: React.FC<SignInModalProps> = ({ isOpen, onClose, context = 'd
               }
           }
       } catch (err: any) {
-          // If login fails, check if it was due to invalid credentials or user not found
-          // API usually returns specific error. Assuming 401 for bad pass, 404 for user not found.
-          // For now, if we can't distinguish, we assume bad credentials if user exists check was removed.
-          // However, the previous logic checked for existence first.
-          // Let's bring back existence check logic if API supports it, otherwise fallback to handling error.
-          // Since checkUserExists is effectively disabled in api.ts, we rely on error handling.
-          
-          // Simple heuristic: If "User not found" or similar, go to registration.
-          // If "Invalid credentials", show error.
+          // If login fails
           const msg = err.message || '';
           if (msg.includes('not found') || msg.includes('No user')) {
                setView('name_input');
           } else {
                setError('Incorrect email or password. Please try again.');
           }
+      } finally {
+          setIsCheckingUser(false);
       }
   };
 
@@ -400,10 +415,10 @@ const SignInModal: React.FC<SignInModalProps> = ({ isOpen, onClose, context = 'd
 
                         <button
                             type="submit"
-                            disabled={isLoading}
+                            disabled={isLoading || isCheckingUser}
                             className="w-full h-12 bg-purple-600 hover:bg-purple-500 text-white rounded-full font-bold text-sm transition-colors disabled:opacity-50 shadow-lg shadow-purple-600/20"
                         >
-                            {isLoading ? 'Processing...' : 'Continue'}
+                            {isLoading || isCheckingUser ? 'Processing...' : 'Continue'}
                         </button>
                     </div>
                 </form>
@@ -420,7 +435,7 @@ const SignInModal: React.FC<SignInModalProps> = ({ isOpen, onClose, context = 'd
                     </button>
 
                     <h2 className="text-2xl font-bold text-white mb-2">Nice to meet you!</h2>
-                    <p className="text-neutral-400 text-sm mb-6">Please enter your name to finish setting up your account.</p>
+                    <p className="text-neutral-400 text-sm mb-6">It looks like you're new here. Please enter your name to create your account.</p>
 
                     <div className="space-y-4">
                         <div>

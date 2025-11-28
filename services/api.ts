@@ -4,171 +4,20 @@ import { v4 as uuidv4 } from 'uuid';
 import { createEventSlug } from '../utils/url';
 import * as emailService from './emailService';
 
-// Updated Base URL
-const API_URL = 'http://api.eventsta.com:8181/eventsta';
+// Update Base URL to use HTTPS as requested
+const getBaseUrl = () => {
+    return 'https://api.eventsta.com:8181/eventsta';
+};
+
+const API_URL = getBaseUrl();
 
 // --- LOCAL STORAGE HELPERS ---
 const getToken = (): string | null => localStorage.getItem('auth_token');
 const setToken = (token: string) => localStorage.setItem('auth_token', token);
 const removeToken = () => localStorage.removeItem('auth_token');
 
-// --- ROBUST MOCK DATA (Fallback for API failures) ---
-const MOCK_EVENTS_DATA = [
-    {
-        id: 'e1',
-        title: 'TidalRave Long Beach',
-        hostId: 'h2',
-        hostName: 'Illtronic Events',
-        date: '2026-11-15T20:00',
-        endDate: '2026-11-16T02:00',
-        location: 'Long Beach, CA',
-        description: "Set sail on a sonic journey with Illtronic Events. Experience the best of house and techno on the open water with stunning views of the Long Beach skyline. Don't miss the boat!",
-        images: ["https://images.unsplash.com/photo-1530649159659-c8beb2992433?ixlib=rb-4.1.0&auto=format&fit=crop&q=80&w=1740", "https://images.unsplash.com/photo-1563700816155-1d613ba479f2?ixlib=rb-4.1.0&auto=format&fit=crop&q=80&w=1744", "https://images.unsplash.com/photo-1670880016506-8559008ddc8a?ixlib=rb-4.1.0&auto=format&fit=crop&q=80&w=1740"],
-        commission_rate: 10,
-        promo_discount_rate: 5,
-        type: 'ticketed',
-        status: 'PUBLISHED',
-        inventory: [{ id: 't1', type: 'GA', price: 45, quantity_total: 200, quantity_sold: 45 }],
-        schedule: [
-            { id: 's1', areaId: 'main', title: 'Warmup Set', startTime: '2026-11-15T20:00', endTime: '2026-11-15T22:00' },
-            { id: 's2', areaId: 'main', title: 'Headliner', startTime: '2026-11-15T22:00', endTime: '2026-11-16T00:00' }
-        ],
-        venueAreas: [{ id: 'main', name: 'Main Deck' }]
-    },
-    {
-        id: 'e2',
-        title: 'LA Noir: Warehouse Sessions',
-        hostId: 'h1',
-        hostName: 'Alex Promo',
-        date: '2026-11-22T22:00',
-        endDate: '2026-11-23T04:00',
-        location: 'Los Angeles, CA',
-        description: "An underground experience in the heart of LA's industrial district. Gritty, raw, and unfiltered techno until the sun comes up.",
-        images: ["https://cdn.prod.website-files.com/608c0b5889a6a24eecb46c23/60b3ae8e1c7edd824bf74c7f_24-5-1024x683-1.jpeg", "https://images.unsplash.com/photo-1505236858219-8359eb29e329?ixlib=rb-4.1.0&auto=format&fit=crop&q=80&w=1862"],
-        commission_rate: 15,
-        promo_discount_rate: 10,
-        type: 'ticketed',
-        status: 'PUBLISHED',
-        inventory: [{ id: 't2', type: 'Early Bird', price: 20, quantity_total: 100, quantity_sold: 100 }]
-    },
-    {
-        id: 'e3',
-        title: 'Desert Bloom Festival',
-        hostId: 'h3',
-        hostName: 'Community Arts & Festivals',
-        date: '2026-12-05T21:00',
-        endDate: '2026-12-06T03:00',
-        location: 'Palm Springs, CA',
-        description: "A celebration of art, music, and nature under the desert stars.",
-        images: ["https://images.unsplash.com/photo-1524368535928-5b5e00ddc76b?q=80&w=1600&auto=format&fit=crop", "https://images.unsplash.com/photo-1514525253161-7a4medd19cd819?q=80&w=1600&auto=format&fit=crop"],
-        commission_rate: 12,
-        promo_discount_rate: 5,
-        type: 'ticketed',
-        status: 'PUBLISHED',
-        inventory: [{ id: 't3', type: 'Weekend Pass', price: 150, quantity_total: 500, quantity_sold: 120 }]
-    },
-    {
-        id: 'e4',
-        title: 'Golden Gate Grooves',
-        hostId: 'h4',
-        hostName: 'EMX',
-        date: '2026-12-15T22:00',
-        endDate: '2026-12-16T02:00',
-        location: 'San Francisco, CA',
-        description: "EMX presents a night of soulful house and disco with panoramic views.",
-        images: ["https://images.unsplash.com/photo-1581968902132-d27ba6dd8b77?ixlib=rb-4.1.0&auto=format&fit=crop&q=60&w=900"],
-        commission_rate: 8,
-        promo_discount_rate: 5,
-        type: 'ticketed',
-        status: 'PUBLISHED',
-        inventory: [{ id: 't4', type: 'Entry', price: 25, quantity_total: 150, quantity_sold: 10 }]
-    },
-    {
-        id: 'e5',
-        title: 'SD Sunset Sessions',
-        hostId: 'h1',
-        hostName: 'Alex Promo',
-        date: '2026-12-20T16:00',
-        endDate: '2026-12-20T21:00',
-        location: 'San Diego, CA',
-        description: "Join us for a blissful evening of chill house and melodic vibes as the sun sets over the Pacific.",
-        images: ["https://images.unsplash.com/photo-1715618154218-e5a0b547cbdd?ixlib=rb-4.1.0&auto=format&fit=crop&q=80&w=1740"],
-        commission_rate: 20,
-        promo_discount_rate: 10,
-        type: 'ticketed',
-        status: 'PUBLISHED',
-        inventory: [{ id: 't5', type: 'RSVP', price: 10, quantity_total: 100, quantity_sold: 80 }]
-    },
-    {
-        id: 'e8',
-        title: 'Massive: DJ Competition',
-        hostId: 'h2',
-        hostName: 'Illtronic Events',
-        date: '2026-10-25T21:00',
-        endDate: '2026-10-26T02:00',
-        location: 'Los Angeles, CA',
-        description: "The biggest up-and-coming DJs battle it out for a headline slot. Support your favorite artist!",
-        images: ["https://www.eventbrite.com/e/_next/image?url=https%3A%2F%2Fimg.evbuc.com%2Fhttps%253A%252F%252Fcdn.evbuc.com%252Fimages%252F1156731733%252F172095495407%252F1%252Foriginal.20251018-212521%3Fcrop%3Dfocalpoint%26fit%3Dcrop%26w%3D600%26auto%3Dformat%252Ccompress%26q%3D75%26sharp%3D10%26fp-x%3D0.5%26fp-y%3D0.5%26s%3D02949c32ca06cefcc6b85e3ce182e5a4&w=940&q=75"],
-        commission_rate: 25,
-        promo_discount_rate: 0,
-        type: 'fundraiser',
-        status: 'PUBLISHED',
-        inventory: [{ id: 't8', type: 'Vote / Donation', price: 5, quantity_total: 10000, quantity_sold: 400 }],
-        competitions: [{
-            id: 'c1',
-            type: 'DJ_TICKET_SALES',
-            status: 'ACTIVE',
-            name: 'Headliner Slot Competition',
-            description: 'Top seller gets to open for the headliner!',
-            sectionIds: [],
-            competitorIds: ['u_demo_1', 'u_demo_2'],
-            startDate: '2026-09-01T00:00:00Z',
-            cutoffDate: '2026-10-25T00:00:00Z'
-        }]
-    },
-    {
-        id: 'e9',
-        title: 'Art for Hearts Charity',
-        hostId: 'h3',
-        hostName: 'Community Arts & Festivals',
-        date: '2026-09-20T18:00',
-        endDate: '2026-09-20T22:00',
-        location: 'Santa Monica, CA',
-        description: "Raise funds for local youth art programs. All proceeds go directly to Art for Hearts.",
-        images: ["https://images.unsplash.com/photo-1532629345422-7515f3d16bb6?q=80&w=1740&auto=format&fit=crop"],
-        commission_rate: 50,
-        promo_discount_rate: 0,
-        type: 'fundraiser',
-        status: 'PUBLISHED',
-        inventory: [{ id: 't9', type: 'Donation', price: 20, quantity_total: 1000, quantity_sold: 50 }]
-    },
-    {
-        id: 'e_demo_1',
-        title: "Galactic New Year's Eve",
-        hostId: 'h_demo',
-        hostName: 'Cosmic Events',
-        date: '2026-12-31T21:00',
-        endDate: '2027-01-01T04:00',
-        location: 'Downtown Space Center, CA',
-        description: "Blast off into the new year with an intergalactic party.",
-        images: ["https://images.unsplash.com/photo-1467810563316-b5476525c0f9?q=80&w=1738&auto=format&fit=crop"],
-        commission_rate: 10,
-        promo_discount_rate: 10,
-        type: 'ticketed',
-        status: 'PUBLISHED',
-        inventory: [{ id: 't_demo', type: 'Orbit Pass', price: 100, quantity_total: 200, quantity_sold: 150 }]
-    }
-];
-
-let mockSystemSettings: SystemSettings = {
-    platformName: 'Eventsta',
-    supportEmail: 'support@eventsta.com',
-    platformFeePercent: 5.9,
-    platformFeeFixed: 0.35,
-    maintenanceMode: false,
-    disableRegistration: false
-};
-
+// --- MOCK DATA FOR DEMO LOGIN ONLY ---
+// This is RETAINED specifically for the "Demo Login" feature, which is not a fallback but a specific feature.
 const MOCK_USER = {
     id: 'demo_user',
     name: 'Demo User',
@@ -192,155 +41,151 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
 
     const url = `${API_URL}${endpoint}`;
     const method = options.method || 'GET';
+    const timestamp = new Date().toISOString().split('T')[1].slice(0, -1); // HH:mm:ss.sss
 
-    console.log(`📡 [API REQ] ${method} ${url}`);
+    console.log(`[${timestamp}] 📡 [API REQ] ${method} ${url}`);
     
     // Check for mixed content issues early
     const isMixedContent = typeof window !== 'undefined' && window.location.protocol === 'https:' && url.startsWith('http:');
 
     try {
-        // If mixed content, force fail to trigger fallback
         if (isMixedContent) {
-            throw new Error("Mixed Content Blocked");
+            throw new Error("Mixed Content Blocked: The page is loaded over HTTPS but is requesting an insecure HTTP API.");
         }
 
         const response = await fetch(url, { ...options, headers });
+        console.log(`[${timestamp}] 📥 [API RES] ${response.status} ${url}`);
+
         const text = await response.text();
-        
-        console.log(`📥 [API RES] ${response.status} ${url}`);
 
         if (!response.ok) {
-            throw new Error(text || `API Error: ${response.status}`);
+            let errorMessage = `HTTP Error: ${response.status} ${response.statusText}`;
+            try {
+                // Try to parse JSON error message from backend (e.g. {"error": "Unauthorized"})
+                const errorJson = JSON.parse(text);
+                if (errorJson.error) errorMessage = errorJson.error;
+                else if (errorJson.message) errorMessage = errorJson.message;
+            } catch (e) {
+                // If not JSON, use the raw text if available
+                if (text) errorMessage = text;
+            }
+            throw new Error(errorMessage);
         }
 
         return text ? JSON.parse(text) : {};
-    } catch (error) {
-        console.warn(`⚠️ [API FAIL] ${method} ${url} - Switching to Mock Data`, error);
-        return getMockFallback<T>(endpoint, options, error);
-    }
-}
+    } catch (error: any) {
+        const timestampErr = new Date().toISOString().split('T')[1].slice(0, -1);
+        let failureReason = error.message || 'Unknown Error';
+        
+        // Diagnose common fetch failures
+        if (error.name === 'TypeError' && error.message === 'Failed to fetch') {
+             if (typeof navigator !== 'undefined' && !navigator.onLine) {
+                 failureReason = "Offline: Device is not connected to the internet.";
+             } else if (isMixedContent) {
+                 failureReason = "Mixed Content: Browser blocked insecure HTTP request from HTTPS origin.";
+             } else {
+                 failureReason = "Network/CORS Error: The server is unreachable, refused connection, or CORS headers are missing.";
+             }
+        } else if (isMixedContent) {
+             failureReason = "Mixed Content Blocked: Browser security prevented HTTP request.";
+        }
 
-// --- FALLBACK MOCK HANDLER ---
-function getMockFallback<T>(endpoint: string, options: any, error: any): any {
-    // 1. Events List
-    if (endpoint === '/events') {
-        return MOCK_EVENTS_DATA;
+        console.group(`❌ [API FAILURE] ${method} ${url}`);
+        console.error(`Time: ${timestampErr}`);
+        console.error(`Reason: ${failureReason}`);
+        console.error(`Origin: ${typeof window !== 'undefined' ? window.location.origin : 'Server'}`);
+        console.error(`Target: ${url}`);
+        // console.error(`Stack:`, error.stack); // Optional: reduced noise
+        console.groupEnd();
+        
+        // Re-throw to ensure caller knows it failed
+        throw error;
     }
-    
-    // 2. Event Details
-    if (endpoint.match(/^\/events\/[^/]+$/) && options.method !== 'POST' && options.method !== 'PATCH') {
-        const id = endpoint.split('/')[2];
-        const event = MOCK_EVENTS_DATA.find(e => e.id === id);
-        return event || MOCK_EVENTS_DATA[0];
-    }
-
-    // 3. User / Me
-    if (endpoint === '/users/me') {
-        return MOCK_USER;
-    }
-
-    // 4. System Settings
-    if (endpoint === '/system/settings') {
-        return mockSystemSettings;
-    }
-
-    // 5. System Stats
-    if (endpoint === '/admin/stats') {
-        return { totalUsers: 1250, totalEvents: 45, grossVolume: 154000, platformFees: 9200 };
-    }
-
-    // 6. Report Data
-    if (endpoint.includes('/report')) {
-        return {
-            gross_sales: 12500,
-            tickets_sold: 342,
-            promoter_sales: 4500
-        };
-    }
-
-    // 7. My Hosts
-    if (endpoint === '/hosts/mine') {
-        return [{ id: 'h1', name: 'Demo Host Group', description: 'My demo host', eventIds: ['e_demo_1'] }];
-    }
-
-    // 8. Other Defaults
-    if (options.method === 'POST') {
-        // For writes, return a success-like object
-        if (endpoint.includes('login') || endpoint.includes('register')) return { token: 'mock_jwt_token', user: MOCK_USER };
-        if (endpoint.includes('checkout')) return { orderId: `ord_${uuidv4()}` };
-        return { id: uuidv4(), success: true };
-    }
-
-    return [];
 }
 
 // --- AUTHENTICATION ---
 
 export const checkUserExists = async (email: string): Promise<boolean> => {
-    return false; 
+    console.info(`[ACTION] checkUserExists: Checking ${email}`);
+    // REMOVED: try/catch fallback. If API fails, UI should know.
+    const res = await request<{ exists: boolean }>(`/auth/check?email=${encodeURIComponent(email)}`);
+    return res.exists;
 };
 
 export const registerUser = async (email: string, name: string, role: 'attendee' | 'host', password?: string): Promise<User> => {
+    console.info(`[ACTION] registerUser: Registering ${email} as ${role}`);
     const res = await request<any>('/auth/register', {
         method: 'POST',
         body: JSON.stringify({ email, password: password || 'placeholder123', name, role: role === 'host' ? 'ADMIN' : 'USER' })
     });
     if (res.token) setToken(res.token);
-    return mapApiUserToFrontend(res.user || MOCK_USER);
+    return mapApiUserToFrontend(res.user);
 };
 
 export const signIn = async (provider: string, credentials?: string): Promise<User> => {
+    console.info(`[ACTION] signIn: Provider ${provider}`);
     if (provider === 'demo' || provider === 'admin') {
         const mockUser = { ...MOCK_USER, isSystemAdmin: provider === 'admin', id: provider === 'admin' ? 'admin_id' : 'demo_id', name: provider === 'admin' ? 'System Admin' : 'Demo User' };
         return mapApiUserToFrontend(mockUser);
     }
     const res = await request<any>('/auth/login', {
         method: 'POST',
-        body: JSON.stringify({ email: 'demo@test.com', password: 'password' }) // Mock creds
+        body: JSON.stringify({ email: provider === 'email' ? credentials?.split('|')[0] : undefined, password: 'password', provider_token: provider !== 'email' ? credentials : undefined }) 
     });
     if (res.token) setToken(res.token);
-    return mapApiUserToFrontend(res.user || MOCK_USER);
+    return mapApiUserToFrontend(res.user);
 };
 
 export const loginWithPassword = async (email: string, password: string): Promise<User> => {
-    return signIn('email', password);
+    console.info(`[ACTION] loginWithPassword: ${email}`);
+    const res = await request<any>('/auth/login', {
+        method: 'POST',
+        body: JSON.stringify({ email, password })
+    });
+    if (res.token) setToken(res.token);
+    return mapApiUserToFrontend(res.user);
 };
 
 export const getUserProfile = async (): Promise<User> => {
+    console.info(`[ACTION] getUserProfile: Fetching 'me'`);
     const me = await request<any>('/users/me');
+    
     let promoStats: PromoStat[] = [];
     try {
         promoStats = await request<PromoStat[]>('/promotions/mine');
-    } catch (e) {}
-    
-    // Mock promo stats if empty
-    if (!promoStats || promoStats.length === 0) {
-        promoStats = [
-            { eventId: 'e1', eventName: 'TidalRave Long Beach', promoLink: 'http://link.com/ref1', clicks: 120, sales: 15, commissionPct: 10, earned: 150.00, status: 'active' }
-        ];
+    } catch (e) {
+        console.warn("[WARN] Failed to load promotions for profile (non-critical)", e);
     }
-
+    
     let payouts: Payout[] = [];
+    // If we have other non-critical endpoints, we can try/catch them individually, but 'me' must succeed.
+    
     return mapApiUserToFrontend(me, promoStats, payouts);
 };
 
 export const getUsersByIds = async (ids: string[]): Promise<User[]> => {
-    return ids.map(id => ({ ...mapApiUserToFrontend(MOCK_USER), id, name: `User ${id.substring(0,4)}` }));
+    console.info(`[ACTION] getUsersByIds: Fetching ${ids.length} users`);
+    if (ids.length === 0) return [];
+    const users = await request<any[]>(`/users?ids=${ids.join(',')}`);
+    return users.map(u => mapApiUserToFrontend(u));
 };
 
 // --- EVENTS ---
 
 export const getFeaturedEvents = async (): Promise<Event[]> => {
+    console.info(`[ACTION] getFeaturedEvents: Loading homepage events`);
     const events = await request<any[]>('/events');
     return events.map(mapApiEventToFrontend);
 };
 
 export const getEventDetails = async (id: string): Promise<Event> => {
+    console.info(`[ACTION] getEventDetails: Fetching ${id}`);
     const event = await request<any>(`/events/${id}`);
     return mapApiEventToFrontend(event);
 };
 
 export const createEvent = async (userId: string, hostId: string, eventData: Partial<Event>): Promise<Event> => {
+    console.info(`[ACTION] createEvent: User ${userId} creating event for Host ${hostId}`);
     const res = await request<any>('/events', {
         method: 'POST',
         body: JSON.stringify({ ...eventData, host_id: hostId })
@@ -349,6 +194,7 @@ export const createEvent = async (userId: string, hostId: string, eventData: Par
 };
 
 export const updateEvent = async (userId: string, eventId: string, updates: Partial<Event>): Promise<Event> => {
+    console.info(`[ACTION] updateEvent: Updating ${eventId}`);
     const res = await request<any>(`/events/${eventId}`, {
         method: 'PATCH',
         body: JSON.stringify(updates)
@@ -357,95 +203,104 @@ export const updateEvent = async (userId: string, eventId: string, updates: Part
 };
 
 export const getEventsByIds = async (ids: string[]): Promise<Event[]> => {
-    const promises = ids.map(id => getEventDetails(id).catch(() => null));
-    const results = await Promise.all(promises);
-    return results.filter(e => e !== null) as Event[];
+    console.info(`[ACTION] getEventsByIds: Fetching ${ids.length} events`);
+    if (ids.length === 0) return [];
+    const events = await request<any[]>(`/events?ids=${ids.join(',')}`);
+    return events.map(mapApiEventToFrontend);
 };
 
 export const getOtherEventsByHost = async (hostId: string, excludeEventId: string): Promise<Event[]> => {
-    try {
-        const allEvents = await getFeaturedEvents();
-        return allEvents.filter(e => e.hostId === hostId && e.id !== excludeEventId);
-    } catch (e) { return []; }
+    console.info(`[ACTION] getOtherEventsByHost: Host ${hostId} excluding ${excludeEventId}`);
+    const events = await request<any[]>(`/events?host_id=${hostId}&exclude=${excludeEventId}`);
+    return events.map(mapApiEventToFrontend);
 };
 
 // --- TICKETING & ORDERS ---
 
 export const purchaseTicket = async (userId: string, eventId: string, cart: CheckoutCart, recipientUserId?: string, promoCode?: string, fees?: any): Promise<void> => {
+    console.info(`[ACTION] purchaseTicket: User ${userId} purchasing for Event ${eventId}`);
     await request<any>('/orders/checkout', {
         method: 'POST',
-        body: JSON.stringify({ event_id: eventId, items: cart })
+        body: JSON.stringify({ event_id: eventId, items: cart, recipient_user_id: recipientUserId, promo_code: promoCode, fees })
     });
 };
 
 export const getOrdersForEvent = async (eventId: string): Promise<Order[]> => {
-    try {
-        const orders = await request<any[]>(`/events/${eventId}/attendees`);
-        if (Array.isArray(orders) && orders.length > 0) return orders; // If real API works
-        
-        // Mock Orders
-        return [
-            { orderId: 'ord_1', eventId, purchaserName: 'Alice Wonders', purchaserEmail: 'alice@test.com', purchaseDate: new Date().toISOString(), items: [{ ticketType: 'General Admission', quantity: 2, pricePerTicket: 45 }], totalPaid: 90, status: 'Completed' },
-            { orderId: 'ord_2', eventId, purchaserName: 'Bob Builder', purchaserEmail: 'bob@test.com', purchaseDate: new Date().toISOString(), items: [{ ticketType: 'VIP', quantity: 1, pricePerTicket: 85 }], totalPaid: 85, status: 'Completed' }
-        ];
-    } catch(e) { return []; }
+    console.info(`[ACTION] getOrdersForEvent: Fetching orders for ${eventId}`);
+    return await request<Order[]>(`/events/${eventId}/orders`);
 };
 
 export const validateTicket = async (eventId: string, ticketData: string): Promise<{valid: boolean, message: string, ticket?: any}> => {
-    // Mock Validation
-    return { valid: true, message: 'VALID', ticket: { id: ticketData, holder: 'Mock User', type: 'General Admission', checkedIn: false } };
+    console.info(`[ACTION] validateTicket: Validating for Event ${eventId}`);
+    return await request<{valid: boolean, message: string, ticket?: any}>('/check-in/validate', {
+        method: 'POST',
+        body: JSON.stringify({ event_id: eventId, qr_data: ticketData })
+    });
 };
 
 export const checkInTicket = async (eventId: string, ticketId: string): Promise<void> => {
-    await request('/check-in/commit', { method: 'POST', body: JSON.stringify({ ticket_id: ticketId }) });
+    console.info(`[ACTION] checkInTicket: Checking in ticket ${ticketId}`);
+    await request('/check-in/commit', { method: 'POST', body: JSON.stringify({ event_id: eventId, ticket_id: ticketId }) });
 };
 
 // --- HOSTS ---
 
 export const getHostDetails = async (id: string): Promise<Host> => {
-    const res = await request<any>(`/hosts/${id}`);
-    return {
-        id: res.id || id,
-        name: res.name || 'Mock Host',
-        ownerUserId: res.owner_user_id || 'owner_1',
-        description: res.description || 'A great event host.',
-        eventIds: res.eventIds || [],
-        reviews: [],
-        imageUrl: res.image_url || 'https://picsum.photos/200',
-        coverImageUrl: res.cover_image_url || 'https://picsum.photos/800/300'
-    };
+    console.info(`[ACTION] getHostDetails: Fetching ${id}`);
+    return await request<Host>(`/hosts/${id}`);
 };
 
 export const getHostsByIds = async (ids: string[]): Promise<Host[]> => {
-    const myHosts = await request<any[]>('/hosts/mine');
-    return myHosts.map(h => ({
-        id: h.id, name: h.name, ownerUserId: 'me', description: h.description, eventIds: h.eventIds || [], reviews: []
-    }));
+    console.info(`[ACTION] getHostsByIds: Fetching ${ids.length} hosts`);
+    return await request<Host[]>(`/hosts?ids=${ids.join(',')}`);
 };
 
 export const createHost = async (userId: string, name: string): Promise<Host> => {
+    console.info(`[ACTION] createHost: User ${userId} creating host "${name}"`);
     const res = await request<any>('/hosts', { method: 'POST', body: JSON.stringify({ name }) });
-    return { id: res.id || uuidv4(), name, ownerUserId: userId, eventIds: [], reviews: [] };
+    return res;
 };
 
-export const getHostReviews = async (hostId: string): Promise<Review[]> => { return []; };
-export const createHostReview = async (hostId: string, review: any): Promise<void> => { };
+export const getHostReviews = async (hostId: string): Promise<Review[]> => { 
+    console.info(`[ACTION] getHostReviews: Fetching for ${hostId}`);
+    return await request<Review[]>(`/hosts/${hostId}/reviews`);
+};
+
+export const createHostReview = async (hostId: string, review: any): Promise<void> => {
+    console.info(`[ACTION] createHostReview: Reviewing ${hostId}`);
+    await request(`/hosts/${hostId}/reviews`, { method: 'POST', body: JSON.stringify(review) });
+};
 
 // --- SYSTEM ADMIN ---
 
-export const getSystemStats = async () => { return await request<any>('/admin/stats'); };
+export const getSystemStats = async () => { 
+    console.info(`[ACTION] getSystemStats`);
+    return await request<any>('/admin/stats'); 
+};
 export const getAllUsersAdmin = async (page: number, limit: number, search: string) => {
-    return { users: [mapApiUserToFrontend(MOCK_USER)], total: 1 };
+    console.info(`[ACTION] getAllUsersAdmin: Page ${page}`);
+    return await request<{ users: User[], total: number }>(`/admin/users?page=${page}&limit=${limit}&search=${encodeURIComponent(search)}`);
 };
 export const getSystemSettings = async (): Promise<SystemSettings> => {
+    console.info(`[ACTION] getSystemSettings`);
     return await request<SystemSettings>('/system/settings');
 };
 export const updateSystemSettings = async (settings: SystemSettings): Promise<SystemSettings> => {
-    return settings;
+    console.info(`[ACTION] updateSystemSettings`);
+    return await request<SystemSettings>('/system/settings', { method: 'PUT', body: JSON.stringify(settings) });
 };
-export const getEmailDrafts = async (): Promise<EmailDraft[]> => [];
-export const getSystemEmailTemplates = async (): Promise<SystemEmailTemplate[]> => [];
-export const launchEmailCampaign = async (id: string, role: TargetRole): Promise<EmailCampaign> => ({ id, draftId: id, subject: 'Test', body: '', targetRole: role, status: 'COMPLETED', progress: 100, total: 100, startTime: new Date().toISOString() });
+export const getEmailDrafts = async (): Promise<EmailDraft[]> => {
+    console.info(`[ACTION] getEmailDrafts`);
+    return await request<EmailDraft[]>('/admin/email/drafts');
+};
+export const getSystemEmailTemplates = async (): Promise<SystemEmailTemplate[]> => {
+    console.info(`[ACTION] getSystemEmailTemplates`);
+    return await request<SystemEmailTemplate[]>('/admin/email/system-templates');
+};
+export const launchEmailCampaign = async (id: string, role: TargetRole): Promise<EmailCampaign> => {
+    console.info(`[ACTION] launchEmailCampaign: Draft ${id} to ${role}`);
+    return await request<EmailCampaign>('/admin/email/campaigns', { method: 'POST', body: JSON.stringify({ draft_id: id, target_role: role }) });
+};
 
 // --- UTILITIES & MAPPERS ---
 
@@ -460,24 +315,23 @@ function mapApiUserToFrontend(apiUser: any, promoStats: PromoStat[] = [], payout
         id: apiUser.id,
         name: apiUser.name,
         email: apiUser.email,
-        managedHostIds: apiUser.managedHostIds || ['h1'], // Mock host access
-        purchasedTickets: [],
+        managedHostIds: apiUser.managedHostIds || [],
+        purchasedTickets: apiUser.purchasedTickets || [],
         promoStats: promoStats,
         payouts: payouts,
         isSystemAdmin: apiUser.role === 'ADMIN' || apiUser.isSystemAdmin,
         stripeConnected: apiUser.stripe_connected,
         stripeAccountId: apiUser.stripe_account_id,
         artistProfile: apiUser.artist_profile,
-        notificationPreferences: apiUser.notification_preferences
+        notificationPreferences: apiUser.notification_preferences,
+        isDisabled: apiUser.is_disabled
     };
 }
 
 function mapApiEventToFrontend(apiEvent: any): Event {
-    // Handle malformed/stringified objects from the bad API
     let schedule = [];
     let venueAreas = [];
     
-    // Safely attempt to parse or fallback if it's the broken string "[object Object]"
     if (Array.isArray(apiEvent.schedule)) {
         schedule = apiEvent.schedule;
     }
@@ -505,68 +359,199 @@ function mapApiEventToFrontend(apiEvent: any): Event {
             type: inv.type,
             price: inv.price,
             quantity: inv.quantity_total,
-            sold: inv.quantity_sold
+            sold: inv.quantity_sold,
+            minimumDonation: inv.min_donation
         })),
-        addOns: [],
+        addOns: apiEvent.addOns || [],
         venueAreas: venueAreas,
         schedule: schedule,
         competitions: apiEvent.competitions || [],
-        forms: [],
-        checkIns: {}
+        forms: apiEvent.forms || [],
+        checkIns: apiEvent.checkIns || {}
     };
 }
 
-// --- MOCKS FOR REMAINING EXPORTS ---
+// --- REMAINING EXPORTS ---
 export const getReportData = async (eventId: string): Promise<ReportData> => {
-    return {
-        event: await getEventDetails(eventId),
-        kpis: { grossSales: 15000, ticketsSold: 300, pageViews: 5000, promoterSales: 2000 },
-        salesByTicketType: [{ type: 'GA', quantitySold: 200, grossSales: 9000 }, { type: 'VIP', quantitySold: 100, grossSales: 6000 }],
-        promotions: []
-    };
+    console.info(`[ACTION] getReportData: ${eventId}`);
+    return await request<ReportData>(`/events/${eventId}/report`);
 };
-export const generateEventDescription = async (title: string, current: string) => "AI Generated description...";
-export const connectUserStripe = async (userId: string) => ({ success: true, accountId: 'acct_123' });
-export const disconnectUserStripe = async (userId: string) => {};
-export const requestEarlyPayout = async (userId: string, amount: number) => {};
-export const getPayoutRequests = async (): Promise<PayoutRequest[]> => [];
-export const getEmailCampaigns = () => Promise.resolve([] as EmailCampaign[]);
-export const saveEmailDraft = (d: EmailDraft) => Promise.resolve();
-export const deleteEmailDraft = (id: string) => Promise.resolve();
-export const approvePayoutRequests = (ids: string[]) => Promise.resolve();
-export const getSystemEmailTemplate = (t: SystemEmailTrigger) => Promise.resolve({} as SystemEmailTemplate);
-export const updateSystemEmailTemplate = (t: SystemEmailTrigger, data: any) => Promise.resolve(data);
-export const deleteHost = (userId: string, hostId: string) => Promise.resolve();
-export const updateHostDetails = (id: string, data: Partial<Host>) => Promise.resolve({ ...data, id } as Host);
-export const getProfileForView = (id: string) => getUserProfile(); 
-export const updateUserProfile = (id: string, data: any) => Promise.resolve({} as User);
-export const undoCheckIn = (eventId: string, ticketId: string) => Promise.resolve();
-export const getOrderDetails = (id: string) => Promise.resolve({} as Order);
-export const refundOrder = (userId: string, orderId: string) => Promise.resolve({} as Order);
-export const getPromoCodesForEvent = (eventId: string) => Promise.resolve([]);
-export const createPromoCode = (userId: string, eventId: string, data: any) => Promise.resolve({} as PromoCode);
-export const deletePromoCode = (userId: string, eventId: string, codeId: string) => Promise.resolve({ success: true });
-export const getCompetitionLeaderboard = (eventId: string) => Promise.resolve([]); 
-export const joinCompetition = (userId: string, event: Event) => Promise.resolve();
-export const startPromotion = (userId: string, event: Event) => Promise.resolve();
-export const stopPromotion = (userId: string, eventId: string) => Promise.resolve();
-export const getPublicForm = (formId: string) => Promise.resolve({} as CompetitionForm);
-export const submitFormResponse = (formId: string, data: any) => Promise.resolve();
-export const getFormResponses = (formId: string) => Promise.resolve([]);
-export const getHostFinancials = (userId: string) => Promise.resolve({ grossVolume: 0, platformFees: 0, netRevenue: 0, pendingBalance: 0, totalPayouts: 0, payouts: [] });
-export const getAllEventsAdmin = async (page: number, limit: number, search: string) => { const events = await getFeaturedEvents(); return { events, total: events.length }; };
-export const requestPasswordReset = (email: string) => Promise.resolve();
-export const changePassword = (userId: string, current: string, newPass: string) => Promise.resolve();
-export const deleteAccount = (userId: string) => Promise.resolve();
-export const updateNotificationPreferences = (userId: string, prefs: NotificationPreferences) => Promise.resolve({} as User);
-export const cancelCampaign = () => Promise.resolve({} as EmailCampaign);
-export const updateUser = (userId: string, data: Partial<User>) => Promise.resolve({} as User);
-export const updateUserStatus = (userId: string, status: boolean) => Promise.resolve({} as User);
-export const sendTestEmail = () => Promise.resolve();
-export const getStripeConnectionStatus = () => Promise.resolve({ connected: false, accountId: null });
-export const connectStripeAccount = () => Promise.resolve({ success: true, accountId: 'acct_123' });
-export const disconnectStripeAccount = () => Promise.resolve();
-export const getAllArtists = () => Promise.resolve([]);
-export const getMockLocations = () => Promise.resolve(['New York', 'Los Angeles', 'London']);
-export const getRawEvent = (id: string) => undefined;
-export const finalizeCompetition = (userId: string, eventId: string, compId: string) => Promise.resolve();
+export const generateEventDescription = async (title: string, current: string) => {
+    console.info(`[ACTION] generateEventDescription: ${title}`);
+    const res = await request<any>('/ai/generate-description', { method: 'POST', body: JSON.stringify({ title, current }) });
+    return res.description;
+};
+export const connectUserStripe = async (userId: string) => {
+    console.info(`[ACTION] connectUserStripe: ${userId}`);
+    return await request<any>('/users/me/stripe/connect', { method: 'POST' });
+};
+export const disconnectUserStripe = async (userId: string) => {
+    console.info(`[ACTION] disconnectUserStripe: ${userId}`);
+    return await request<any>('/users/me/stripe/disconnect', { method: 'POST' });
+};
+export const requestEarlyPayout = async (userId: string, amount: number) => {
+    console.info(`[ACTION] requestEarlyPayout: ${userId} for $${amount}`);
+    return await request<any>('/payouts/request', { method: 'POST', body: JSON.stringify({ amount }) });
+};
+export const getPayoutRequests = async (): Promise<PayoutRequest[]> => {
+    console.info(`[ACTION] getPayoutRequests`);
+    return await request<PayoutRequest[]>('/admin/payouts');
+};
+export const getEmailCampaigns = () => {
+    console.info(`[ACTION] getEmailCampaigns`);
+    return request<EmailCampaign[]>('/admin/email/campaigns');
+};
+export const saveEmailDraft = (d: EmailDraft) => {
+    console.info(`[ACTION] saveEmailDraft`);
+    return request('/admin/email/drafts', { method: 'POST', body: JSON.stringify(d) });
+};
+export const deleteEmailDraft = (id: string) => {
+    console.info(`[ACTION] deleteEmailDraft: ${id}`);
+    return request(`/admin/email/drafts/${id}`, { method: 'DELETE' });
+};
+export const approvePayoutRequests = (ids: string[]) => {
+    console.info(`[ACTION] approvePayoutRequests: ${ids.length} items`);
+    return request('/admin/payouts/approve', { method: 'POST', body: JSON.stringify({ ids }) });
+};
+export const getSystemEmailTemplate = (t: SystemEmailTrigger) => {
+    console.info(`[ACTION] getSystemEmailTemplate: ${t}`);
+    return request<SystemEmailTemplate>(`/admin/email/system-templates/${t}`);
+};
+export const updateSystemEmailTemplate = (t: SystemEmailTrigger, data: any) => {
+    console.info(`[ACTION] updateSystemEmailTemplate: ${t}`);
+    return request(`/admin/email/system-templates/${t}`, { method: 'PUT', body: JSON.stringify(data) });
+};
+export const deleteHost = (userId: string, hostId: string) => {
+    console.info(`[ACTION] deleteHost: ${hostId}`);
+    return request(`/hosts/${hostId}`, { method: 'DELETE' });
+};
+export const updateHostDetails = (id: string, data: Partial<Host>) => {
+    console.info(`[ACTION] updateHostDetails: ${id}`);
+    return request<Host>(`/hosts/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+};
+export const getProfileForView = (id: string) => {
+    console.info(`[ACTION] getProfileForView: ${id}`);
+    return request<User>(`/users/${id}/public`); 
+};
+export const updateUserProfile = (id: string, data: any) => {
+    console.info(`[ACTION] updateUserProfile: ${id}`);
+    return request<User>(`/users/${id}/profile`, { method: 'PUT', body: JSON.stringify(data) });
+};
+export const undoCheckIn = (eventId: string, ticketId: string) => {
+    console.info(`[ACTION] undoCheckIn: ${ticketId}`);
+    return request('/check-in/undo', { method: 'POST', body: JSON.stringify({ event_id: eventId, ticket_id: ticketId }) });
+};
+export const getOrderDetails = (id: string) => {
+    console.info(`[ACTION] getOrderDetails: ${id}`);
+    return request<Order>(`/orders/${id}`);
+};
+export const refundOrder = (userId: string, orderId: string) => {
+    console.info(`[ACTION] refundOrder: ${orderId}`);
+    return request<Order>(`/orders/${orderId}/refund`, { method: 'POST' });
+};
+export const getPromoCodesForEvent = (eventId: string) => {
+    console.info(`[ACTION] getPromoCodesForEvent: ${eventId}`);
+    return request<PromoCode[]>(`/events/${eventId}/promocodes`);
+};
+export const createPromoCode = (userId: string, eventId: string, data: any) => {
+    console.info(`[ACTION] createPromoCode: Event ${eventId}`);
+    return request<PromoCode>(`/events/${eventId}/promocodes`, { method: 'POST', body: JSON.stringify(data) });
+};
+export const deletePromoCode = (userId: string, eventId: string, codeId: string) => {
+    console.info(`[ACTION] deletePromoCode: ${codeId}`);
+    return request<{ success: boolean }>(`/events/${eventId}/promocodes/${codeId}`, { method: 'DELETE' });
+};
+export const getCompetitionLeaderboard = (eventId: string) => {
+    console.info(`[ACTION] getCompetitionLeaderboard: ${eventId}`);
+    return request<LeaderboardEntry[]>(`/competitions/${eventId}/leaderboard`); 
+};
+export const joinCompetition = (userId: string, event: Event) => {
+    console.info(`[ACTION] joinCompetition: User ${userId} -> Event ${event.id}`);
+    return request('/promotions/join', { method: 'POST', body: JSON.stringify({ event_id: event.id }) });
+};
+export const startPromotion = (userId: string, event: Event) => {
+    console.info(`[ACTION] startPromotion: User ${userId} -> Event ${event.id}`);
+    return request('/promotions/join', { method: 'POST', body: JSON.stringify({ event_id: event.id }) });
+};
+export const stopPromotion = (userId: string, eventId: string) => {
+    console.info(`[ACTION] stopPromotion: ${eventId}`);
+    return request(`/promotions/${eventId}`, { method: 'DELETE' });
+};
+export const getPublicForm = (formId: string) => {
+    console.info(`[ACTION] getPublicForm: ${formId}`);
+    return request<CompetitionForm>(`/forms/${formId}`);
+};
+export const submitFormResponse = (formId: string, data: any) => {
+    console.info(`[ACTION] submitFormResponse: ${formId}`);
+    return request(`/forms/${formId}/submit`, { method: 'POST', body: JSON.stringify(data) });
+};
+export const getFormResponses = (formId: string) => {
+    console.info(`[ACTION] getFormResponses: ${formId}`);
+    return request<any[]>(`/forms/${formId}/responses`);
+};
+export const getHostFinancials = (userId: string) => {
+    console.info(`[ACTION] getHostFinancials: ${userId}`);
+    return request<HostFinancials>(`/users/${userId}/financials`);
+};
+export const getAllEventsAdmin = async (page: number, limit: number, search: string) => {
+    console.info(`[ACTION] getAllEventsAdmin`);
+    const res = await request<{ events: any[], total: number }>(`/admin/events?page=${page}&limit=${limit}&search=${encodeURIComponent(search)}`);
+    return { events: res.events.map(mapApiEventToFrontend), total: res.total };
+};
+export const requestPasswordReset = (email: string) => {
+    console.info(`[ACTION] requestPasswordReset: ${email}`);
+    return request('/auth/forgot-password', { method: 'POST', body: JSON.stringify({ email }) });
+};
+export const changePassword = (userId: string, current: string, newPass: string) => {
+    console.info(`[ACTION] changePassword: ${userId}`);
+    return request('/auth/change-password', { method: 'POST', body: JSON.stringify({ current_password: current, new_password: newPass }) });
+};
+export const deleteAccount = (userId: string) => {
+    console.info(`[ACTION] deleteAccount: ${userId}`);
+    return request(`/users/${userId}`, { method: 'DELETE' });
+};
+export const updateNotificationPreferences = (userId: string, prefs: NotificationPreferences) => {
+    console.info(`[ACTION] updateNotificationPreferences: ${userId}`);
+    return request<User>(`/users/${userId}/notifications`, { method: 'PUT', body: JSON.stringify(prefs) });
+};
+export const cancelCampaign = (id: string) => {
+    console.info(`[ACTION] cancelCampaign: ${id}`);
+    return request<EmailCampaign>(`/admin/email/campaigns/${id}/cancel`, { method: 'POST' });
+};
+export const updateUser = (userId: string, data: Partial<User>) => {
+    console.info(`[ACTION] updateUser: ${userId}`);
+    return request<User>(`/users/${userId}`, { method: 'PATCH', body: JSON.stringify(data) });
+};
+export const updateUserStatus = (userId: string, status: boolean) => {
+    console.info(`[ACTION] updateUserStatus: ${userId} -> disabled: ${status}`);
+    return request<User>(`/admin/users/${userId}/status`, { method: 'PUT', body: JSON.stringify({ is_disabled: status }) });
+};
+export const getStripeConnectionStatus = () => {
+    console.info(`[ACTION] getStripeConnectionStatus`);
+    return request<{ connected: boolean, accountId: string | null }>('/users/me/stripe/status');
+};
+export const connectStripeAccount = () => {
+    console.info(`[ACTION] connectStripeAccount`);
+    return request<{ success: boolean, accountId: string }>('/users/me/stripe/connect', { method: 'POST' });
+};
+export const disconnectStripeAccount = () => {
+    console.info(`[ACTION] disconnectStripeAccount`);
+    return request('/users/me/stripe/disconnect', { method: 'POST' });
+};
+export const getAllArtists = () => {
+    console.info(`[ACTION] getAllArtists`);
+    return request<User[]>('/artists');
+};
+export const getMockLocations = () => {
+    console.info(`[ACTION] getMockLocations`);
+    // Previously mocked, now requesting real backend location hints if available
+    return request<string[]>('/locations');
+};
+export const getRawEvent = (id: string) => {
+    console.warn(`[DEPRECATED] getRawEvent called for ${id}. This function is removed.`);
+    return undefined; 
+};
+export const finalizeCompetition = (userId: string, eventId: string, compId: string) => {
+    console.info(`[ACTION] finalizeCompetition: ${compId}`);
+    return request(`/competitions/${eventId}/${compId}/finalize`, { method: 'POST' });
+};

@@ -55,7 +55,7 @@ const Home: React.FC = () => {
 
       <footer className="relative z-10 w-full py-8 mt-auto border-t border-white/5 bg-black/30 backdrop-blur-xl text-center">
           <p className="text-neutral-400 text-sm font-medium tracking-wide">
-              Non-profit Event Ticketing Platform by <span className="text-neutral-200">Community Arts and Festivals</span>
+              Non-profit Event Management Platform by <span className="text-neutral-200">Community Arts and Festivals</span>
           </p>
       </footer>
     </div>

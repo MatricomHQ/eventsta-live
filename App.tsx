@@ -34,9 +34,16 @@ const AppContent: React.FC = () => {
   const [isMaintenanceMode, setIsMaintenanceMode] = useState(false);
 
   useEffect(() => {
-      api.getSystemSettings().then(settings => {
-          setIsMaintenanceMode(settings.maintenanceMode);
-      });
+      // Catch error here to prevent app crash if API returns 401 (Unauthorized) for public users
+      api.getSystemSettings()
+          .then(settings => {
+              setIsMaintenanceMode(settings.maintenanceMode);
+          })
+          .catch(err => {
+              // Log strictly to console but do not break the UI
+              console.warn("Failed to fetch system settings (likely unauthorized or offline):", err.message);
+              setIsMaintenanceMode(false);
+          });
   }, []);
 
   // Determine if we are on a public form page
