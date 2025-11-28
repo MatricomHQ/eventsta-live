@@ -1,0 +1,101 @@
+
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="color-scheme" content="dark">
+    <title>Eventsta: Next Gen</title>
+    
+    <!-- TailwindCSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- Google Font: Inter -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;900&display=swap" rel="stylesheet">
+    
+    <style>
+        /* Base styles */
+        :root {
+            color-scheme: dark;
+        }
+        
+        body {
+            font-family: 'Inter', sans-serif;
+            color: #e5e5e5; /* Light neutral text */
+            background-color: #0a0a0a;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+        }
+
+        /* 
+           FIX: Force Google One Tap Container to use Light Scheme.
+           This prevents the "White Border/Background" artifact that occurs 
+           when the browser applies dark mode handling to the iframe container.
+        */
+        #credential_picker_container {
+            color-scheme: light !important;
+            background: transparent !important;
+        }
+        
+        #credential_picker_container iframe {
+            color-scheme: light !important;
+        }
+
+        /* Custom scrollbar */
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #1a1a1a; }
+        ::-webkit-scrollbar-thumb { background: #404040; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #525252; }
+        
+        /* Ken Burns Animations */
+        @keyframes kenburns-tl {
+            0% { transform: scale(1.1) translate(0, 0); }
+            100% { transform: scale(1.25) translate(-10%, -5%); }
+        }
+        @keyframes kenburns-br {
+            0% { transform: scale(1.1) translate(0, 0); }
+            100% { transform: scale(1.25) translate(10%, 5%); }
+        }
+        @keyframes kenburns-center {
+            0% { transform: scale(1.1); }
+            100% { transform: scale(1.25); }
+        }
+
+        /* Subtle text-shadow for readability */
+        .text-glow {
+            text-shadow: 0 0 12px rgba(255, 255, 255, 0.15);
+        }
+        
+        /* Quantity selector input */
+        input[type="number"]::-webkit-inner-spin-button,
+        input[type="number"]::-webkit-outer-spin-button {
+            -webkit-appearance: none;
+            margin: 0;
+        }
+        input[type="number"] {
+            -moz-appearance: textfield;
+        }
+    </style>
+<script type="importmap">
+{
+  "imports": {
+    "react/": "https://aistudiocdn.com/react@^19.2.0/",
+    "react": "https://aistudiocdn.com/react@^19.2.0",
+    "react-dom/": "https://aistudiocdn.com/react-dom@^19.2.0/",
+    "@google/genai": "https://aistudiocdn.com/@google/genai@^1.27.0",
+    "react-router-dom": "https://aistudiocdn.com/react-router-dom@^7.9.4",
+    "uuid": "https://aistudiocdn.com/uuid@^13.0.0",
+    "jsqr": "https://aistudiocdn.com/jsqr@^1.4.0",
+    "@react-oauth/google": "https://aistudiocdn.com/@react-oauth/google@^0.12.1",
+    "jwt-decode": "https://aistudiocdn.com/jwt-decode@^4.0.0",
+    "qrcode": "https://esm.sh/qrcode@1.5.3"
+  }
+}
+</script>
+</head>
+<body>
+    <div id="root"></div>
+</body>
+</html>

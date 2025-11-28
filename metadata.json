@@ -1,0 +1,7 @@
+{
+  "name": "Eventsta 3 Live",
+  "description": "A next-generation event discovery and hosting platform with a sleek, modern interface. Browse upcoming events, purchase tickets, host your own events, and manage promotions all in one place.",
+  "requestFramePermissions": [
+    "camera"
+  ]
+}

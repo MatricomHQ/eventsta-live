@@ -1,0 +1,515 @@
+
+import React, { useState, useEffect } from 'react';
+import Modal from './Modal';
+import { useAuth } from '../contexts/AuthContext';
+import { useNavigate } from 'react-router-dom';
+import { ShieldIcon, GoogleIcon, ArrowLeftIcon, MailIcon, XIcon, PlayCircleIcon } from './Icons';
+import { User } from '../types';
+import * as api from '../services/api';
+import { useGoogleLogin } from '@react-oauth/google';
+import RoleSelectionModal from './RoleSelectionModal';
+
+
+interface SignInModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  context?: 'default' | 'application'; // New prop
+}
+
+const determineRedirectPath = async (user: User): Promise<string> => {
+    // Check if there is a pending checkout return path
+    const pendingEventId = sessionStorage.getItem('pendingCheckoutEventId');
+    if (pendingEventId) {
+        return `/event/${pendingEventId}`;
+    }
+
+    // 0. Check for System Admin
+    if (user.isSystemAdmin) {
+        return '/system-admin';
+    }
+
+    // 1. Check for active hosting (upcoming events)
+    if (user.managedHostIds && user.managedHostIds.length > 0) {
+        const hosts = await api.getHostsByIds(user.managedHostIds);
+        const allEventIds = hosts.flatMap(h => h.eventIds);
+        if (allEventIds.length > 0) {
+            const events = await api.getEventsByIds(allEventIds);
+            const hasUpcomingEvents = events.some(e => new Date(e.date) > new Date());
+            if (hasUpcomingEvents) {
+                return '/events';
+            }
+        }
+    }
+
+    // 2. Check for active promotions
+    if (user.promoStats && user.promoStats.some(p => p.status === 'active')) {
+        return '/promotions';
+    }
+
+    // 3. Check for purchased tickets
+    if (user.purchasedTickets && user.purchasedTickets.length > 0) {
+        return '/my-tickets';
+    }
+
+    // 4. Default to homepage
+    return '/';
+};
+
+
+const SignInModal: React.FC<SignInModalProps> = ({ isOpen, onClose, context = 'default' }) => {
+  const { login, isLoading } = useAuth();
+  const navigate = useNavigate();
+  
+  // Flow State
+  const [view, setView] = useState<'main' | 'email' | 'name_input' | 'forgot_password'>('main');
+  const [pendingGoogleUser, setPendingGoogleUser] = useState<{ email: string; name: string; token: string } | null>(null);
+  // Store pending registration data from email flow
+  const [pendingRegUser, setPendingRegUser] = useState<{ email: string; name: string; password?: string } | null>(null);
+  const [showRoleSelection, setShowRoleSelection] = useState(false);
+
+  // Form State
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [name, setName] = useState('');
+  const [error, setError] = useState('');
+  const [forgotPasswordSuccess, setForgotPasswordSuccess] = useState(false);
+
+  const isApplication = context === 'application';
+
+  // Reset state when modal opens/closes
+  useEffect(() => {
+      if (isOpen) {
+          setView('main');
+          setEmail('');
+          setPassword('');
+          setName('');
+          setError('');
+          setPendingGoogleUser(null);
+          setPendingRegUser(null);
+          setShowRoleSelection(false);
+          setForgotPasswordSuccess(false);
+      }
+  }, [isOpen]);
+
+  const handleGoogleLogin = async (token: string, email: string, name: string) => {
+      try {
+          // Attempt to login with Google token directly
+          const user = await login('google-one-tap', token);
+          
+          if (user) {
+              onClose();
+              if (context === 'default') {
+                  const destination = await determineRedirectPath(user);
+                  navigate(destination);
+              }
+          } else {
+              // Login returned null/failed implies user likely doesn't exist
+              // Trigger registration flow
+              if (isApplication) {
+                  // SPECIAL FLOW: Auto-register for applications
+                  try {
+                      await api.registerUser(email, name, 'attendee');
+                      await login('google-one-tap', token);
+                      onClose();
+                  } catch (regError: any) {
+                      setError(regError.message || "Registration failed.");
+                  }
+              } else {
+                  // Trigger role selection flow for new users
+                  setPendingGoogleUser({ email, name, token });
+                  setShowRoleSelection(true);
+              }
+          }
+      } catch (error) {
+          console.error("Google Login Error", error);
+          setError('Google login failed. Please try again.');
+      }
+  };
+
+  const loginToGoogle = useGoogleLogin({
+    onSuccess: async (tokenResponse) => {
+        // We need user details if registration is required, fetch them
+        try {
+            const userInfoResponse = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+                headers: { Authorization: `Bearer ${tokenResponse.access_token}` },
+            });
+            const userInfo = await userInfoResponse.json();
+            // Use access_token as the credential for our API
+            handleGoogleLogin(tokenResponse.access_token, userInfo.email, userInfo.name);
+        } catch (error) {
+            console.error("Failed to fetch user info", error);
+            setError('Failed to get user info from Google.');
+        }
+    },
+    onError: () => setError('Google Login Failed'),
+  });
+
+  const handleEmailSubmit = async (e: React.FormEvent) => {
+      e.preventDefault();
+      setError('');
+      if (!email || !password) {
+          setError('Please enter both email and password.');
+          return;
+      }
+
+      try {
+          // Try Login with Password directly
+          await api.loginWithPassword(email, password);
+          // Context update handled by api call setting token, but we need to refresh context user
+          const user = await login('email'); // 'email' provider just triggers profile fetch in updated context
+          
+          if (user) {
+              onClose();
+              if (context === 'default') {
+                  const destination = await determineRedirectPath(user);
+                  navigate(destination);
+              }
+          }
+      } catch (err: any) {
+          // If login fails, check if it was due to invalid credentials or user not found
+          // API usually returns specific error. Assuming 401 for bad pass, 404 for user not found.
+          // For now, if we can't distinguish, we assume bad credentials if user exists check was removed.
+          // However, the previous logic checked for existence first.
+          // Let's bring back existence check logic if API supports it, otherwise fallback to handling error.
+          // Since checkUserExists is effectively disabled in api.ts, we rely on error handling.
+          
+          // Simple heuristic: If "User not found" or similar, go to registration.
+          // If "Invalid credentials", show error.
+          const msg = err.message || '';
+          if (msg.includes('not found') || msg.includes('No user')) {
+               setView('name_input');
+          } else {
+               setError('Incorrect email or password. Please try again.');
+          }
+      }
+  };
+
+  const handleNameSubmit = async (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!name.trim()) {
+          setError('Please enter your full name.');
+          return;
+      }
+      
+      if (isApplication) {
+          try {
+              // Auto-register for applications
+              await api.registerUser(email, name, 'attendee', password);
+              await login('email');
+              onClose();
+          } catch (regError: any) {
+              setError(regError.message || "Registration failed.");
+          }
+      } else {
+          // Use dedicated state for email flow pending user
+          setPendingRegUser({ email, name, password });
+          setShowRoleSelection(true);
+      }
+  };
+
+  const handleRoleSelect = async (role: 'attendee' | 'host') => {
+      try {
+          // Handle Google Flow
+          if (pendingGoogleUser) {
+              await api.registerUser(pendingGoogleUser.email, pendingGoogleUser.name, role);
+              const user = await login('google-one-tap', pendingGoogleUser.token);
+              
+              setPendingGoogleUser(null);
+              setShowRoleSelection(false);
+              onClose();
+              
+              if (user) {
+                  const destination = await determineRedirectPath(user);
+                  navigate(destination);
+              }
+              return;
+          }
+
+          // Handle Email/Password Flow
+          if (pendingRegUser) {
+              await api.registerUser(pendingRegUser.email, pendingRegUser.name, role, pendingRegUser.password);
+              const user = await login('email');
+              
+              setPendingRegUser(null);
+              setShowRoleSelection(false);
+              onClose();
+              
+              if (user) {
+                  const destination = await determineRedirectPath(user);
+                  navigate(destination);
+              }
+          }
+      } catch (err: any) {
+          setShowRoleSelection(false);
+          setError(err.message || "Registration failed.");
+          if (pendingGoogleUser) setPendingGoogleUser(null);
+          setView('main');
+      }
+  };
+
+  const handleForgotPassword = async (e: React.FormEvent) => {
+      e.preventDefault();
+      if (!email) {
+          setError("Please enter your email address.");
+          return;
+      }
+      try {
+          await api.requestPasswordReset(email);
+          setForgotPasswordSuccess(true);
+      } catch (err) {
+          setError("Failed to send reset email.");
+      }
+  };
+
+  const handleAdminLogin = async () => {
+      const user = await login('admin');
+      onClose();
+      if (user) {
+          navigate('/system-admin');
+      }
+  }
+
+  const handleDemoLogin = async () => {
+      const user = await login('demo');
+      onClose();
+      if (user && context === 'default') {
+          const destination = await determineRedirectPath(user);
+          navigate(destination);
+      }
+  }
+
+  if (showRoleSelection && (pendingGoogleUser || pendingRegUser)) {
+      return (
+          <RoleSelectionModal 
+            isOpen={true} 
+            onClose={() => { setShowRoleSelection(false); onClose(); }} 
+            onSelectRole={handleRoleSelect} 
+            userName={pendingGoogleUser?.name || pendingRegUser?.name || 'Guest'}
+          />
+      );
+  }
+
+  return (
+    <Modal isOpen={isOpen} onClose={onClose} showCloseButton={false}>
+      <div className="relative w-full max-w-md bg-neutral-900 border border-neutral-800 rounded-2xl shadow-2xl shadow-purple-500/10">
+        <button
+            onClick={onClose}
+            className="absolute top-4 right-4 text-neutral-500 hover:text-white p-2 rounded-full hover:bg-neutral-800 transition-colors z-10"
+            aria-label="Close"
+        >
+            <XIcon className="w-5 h-5" />
+        </button>
+        <div className="p-8">
+            {view === 'main' && (
+                <>
+                    <h2 className="text-2xl font-bold text-center text-white mb-2">
+                        {isApplication ? 'Verify your email to apply' : 'Sign In'}
+                    </h2>
+                    <p className="text-neutral-400 text-center mb-8">
+                        {isApplication ? 'Log in with Google to confirm your submission.' : 'to continue to Eventsta'}
+                    </p>
+                    
+                    {error && <p className="text-red-400 text-sm text-center mb-6 bg-red-900/20 p-3 rounded-lg border border-red-900/50">{error}</p>}
+
+                    <div className="space-y-6">
+                        <button
+                            onClick={() => loginToGoogle()}
+                            disabled={isLoading}
+                            className="social-login-btn w-full h-12 px-6 bg-white text-black rounded-full flex items-center justify-center text-sm font-bold hover:bg-neutral-200 transition-colors disabled:opacity-50"
+                        >
+                            <GoogleIcon className="w-5 h-5 mr-3" />
+                            Continue with Google
+                        </button>
+
+                        <button
+                            onClick={handleDemoLogin}
+                            disabled={isLoading}
+                            className="w-full h-12 px-6 bg-neutral-800 text-white border border-neutral-700 rounded-full flex items-center justify-center text-sm font-bold hover:bg-neutral-700 transition-colors disabled:opacity-50 group"
+                        >
+                            <PlayCircleIcon className="w-5 h-5 mr-3 text-purple-400 group-hover:text-purple-300" />
+                            Try Demo Account
+                        </button>
+
+                        <div className="text-center pt-2">
+                            <button 
+                                onClick={() => setView('email')}
+                                className="text-sm text-neutral-400 hover:text-white font-medium transition-colors underline underline-offset-4 decoration-neutral-700 hover:decoration-white"
+                            >
+                                User email / password
+                            </button>
+                        </div>
+                    </div>
+
+                    {!isApplication && (
+                        <div className="border-t border-neutral-800 mt-8 pt-6 w-full text-center">
+                            <button
+                                onClick={handleAdminLogin}
+                                disabled={isLoading}
+                                className="text-neutral-600 text-xs font-medium hover:text-purple-400 transition-colors flex items-center justify-center gap-2 mx-auto"
+                            >
+                                <ShieldIcon className="w-3 h-3" />
+                                System Admin Login
+                            </button>
+                        </div>
+                    )}
+                </>
+            )}
+
+            {view === 'email' && (
+                <form onSubmit={handleEmailSubmit}>
+                    <button 
+                        type="button" 
+                        onClick={() => setView('main')} 
+                        className="mb-6 text-neutral-400 hover:text-white transition-colors flex items-center text-sm"
+                    >
+                        <ArrowLeftIcon className="w-4 h-4 mr-1" /> Back
+                    </button>
+                    
+                    <h2 className="text-2xl font-bold text-white mb-6">
+                        {isApplication ? 'Verify Email' : 'Sign In / Create Account'}
+                    </h2>
+                    
+                    <div className="space-y-4">
+                        <div>
+                            <label className="block text-xs font-medium text-neutral-400 mb-1">Email Address</label>
+                            <input 
+                                type="email" 
+                                value={email}
+                                onChange={e => setEmail(e.target.value)}
+                                className="w-full h-12 px-4 bg-neutral-800 border border-neutral-700 rounded-lg text-white focus:outline-none focus:border-purple-500 transition-colors"
+                                placeholder="name@example.com"
+                                required
+                            />
+                        </div>
+                        <div>
+                            <div className="flex justify-between mb-1">
+                                <label className="block text-xs font-medium text-neutral-400">Password</label>
+                                <button type="button" onClick={() => setView('forgot_password')} className="text-xs font-medium text-purple-400 hover:text-purple-300">Forgot Password?</button>
+                            </div>
+                            <input 
+                                type="password" 
+                                value={password}
+                                onChange={e => setPassword(e.target.value)}
+                                className="w-full h-12 px-4 bg-neutral-800 border border-neutral-700 rounded-lg text-white focus:outline-none focus:border-purple-500 transition-colors"
+                                placeholder="••••••••"
+                                required
+                            />
+                        </div>
+                        
+                        {error && <p className="text-red-400 text-sm">{error}</p>}
+
+                        <button
+                            type="submit"
+                            disabled={isLoading}
+                            className="w-full h-12 bg-purple-600 hover:bg-purple-500 text-white rounded-full font-bold text-sm transition-colors disabled:opacity-50 shadow-lg shadow-purple-600/20"
+                        >
+                            {isLoading ? 'Processing...' : 'Continue'}
+                        </button>
+                    </div>
+                </form>
+            )}
+
+            {view === 'name_input' && (
+                <form onSubmit={handleNameSubmit}>
+                    <button 
+                        type="button" 
+                        onClick={() => setView('email')} 
+                        className="mb-6 text-neutral-400 hover:text-white transition-colors flex items-center text-sm"
+                    >
+                        <ArrowLeftIcon className="w-4 h-4 mr-1" /> Back
+                    </button>
+
+                    <h2 className="text-2xl font-bold text-white mb-2">Nice to meet you!</h2>
+                    <p className="text-neutral-400 text-sm mb-6">Please enter your name to finish setting up your account.</p>
+
+                    <div className="space-y-4">
+                        <div>
+                            <label className="block text-xs font-medium text-neutral-400 mb-1">Full Name</label>
+                            <input 
+                                type="text" 
+                                value={name}
+                                onChange={e => setName(e.target.value)}
+                                className="w-full h-12 px-4 bg-neutral-800 border border-neutral-700 rounded-lg text-white focus:outline-none focus:border-purple-500 transition-colors"
+                                placeholder="e.g. Alex Smith"
+                                autoFocus
+                                required
+                            />
+                        </div>
+
+                        {error && <p className="text-red-400 text-sm">{error}</p>}
+
+                        <button
+                            type="submit"
+                            className="w-full h-12 bg-purple-600 hover:bg-purple-500 text-white rounded-full font-bold text-sm transition-colors shadow-lg shadow-purple-600/20"
+                        >
+                            {isApplication ? 'Verify & Submit' : 'Create Account'}
+                        </button>
+                    </div>
+                </form>
+            )}
+
+            {view === 'forgot_password' && (
+                <form onSubmit={handleForgotPassword}>
+                    <button 
+                        type="button" 
+                        onClick={() => setView('email')} 
+                        className="mb-6 text-neutral-400 hover:text-white transition-colors flex items-center text-sm"
+                    >
+                        <ArrowLeftIcon className="w-4 h-4 mr-1" /> Back
+                    </button>
+
+                    <h2 className="text-2xl font-bold text-white mb-2">Reset Password</h2>
+                    
+                    {forgotPasswordSuccess ? (
+                        <div className="text-center py-6">
+                            <div className="w-16 h-16 bg-green-500/10 rounded-full flex items-center justify-center mx-auto mb-4">
+                                <MailIcon className="w-8 h-8 text-green-400" />
+                            </div>
+                            <p className="text-green-400 font-medium">Reset link sent!</p>
+                            <p className="text-neutral-400 text-sm mt-2 mb-6">Check your email inbox for instructions.</p>
+                            <button 
+                                type="button"
+                                onClick={() => setView('email')}
+                                className="w-full h-12 bg-neutral-800 hover:bg-neutral-700 text-white rounded-full font-bold text-sm transition-colors"
+                            >
+                                Back to Login
+                            </button>
+                        </div>
+                    ) : (
+                        <>
+                            <p className="text-neutral-400 text-sm mb-6">Enter your email address and we'll send you a link to reset your password.</p>
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="block text-xs font-medium text-neutral-400 mb-1">Email Address</label>
+                                    <input 
+                                        type="email" 
+                                        value={email}
+                                        onChange={e => setEmail(e.target.value)}
+                                        className="w-full h-12 px-4 bg-neutral-800 border border-neutral-700 rounded-lg text-white focus:outline-none focus:border-purple-500 transition-colors"
+                                        placeholder="name@example.com"
+                                        required
+                                        autoFocus
+                                    />
+                                </div>
+
+                                {error && <p className="text-red-400 text-sm">{error}</p>}
+
+                                <button
+                                    type="submit"
+                                    disabled={isLoading}
+                                    className="w-full h-12 bg-purple-600 hover:bg-purple-500 text-white rounded-full font-bold text-sm transition-colors disabled:opacity-50"
+                                >
+                                    Send Reset Link
+                                </button>
+                            </div>
+                        </>
+                    )}
+                </form>
+            )}
+        </div>
+      </div>
+    </Modal>
+  );
+};
+
+export default SignInModal;
