@@ -1,8 +1,4 @@
 
-
-
-
-
 import React, { useState, useEffect, useMemo } from 'react';
 import { TicketIcon, PackageIcon, ShieldCheckIcon } from './Icons';
 import { Event, CheckoutCart, PromoCode } from '../types';
@@ -154,7 +150,7 @@ const FloatingTicketButton: React.FC<FloatingTicketButtonProps> = ({
 
                     {/* Scrollable List */}
                     <div className="p-6 overflow-y-auto custom-scrollbar space-y-4 flex-grow">
-                        {event && event.tickets.map(ticket => {
+                        {event && event.tickets.map((ticket, idx) => {
                             const hasDiscount = appliedPromoCode && event.type === 'ticketed';
                             const discountPct = hasDiscount ? appliedPromoCode.discountPercent : 0;
                             const discountedPrice = ticket.price * (1 - discountPct / 100);
@@ -166,7 +162,7 @@ const FloatingTicketButton: React.FC<FloatingTicketButtonProps> = ({
                             const isUnavailable = isSalesEnded || isSoldOut;
 
                             return event.type === 'ticketed' ? (
-                                <div key={ticket.type} className={`bg-neutral-800/50 border border-white/10 rounded-xl p-4 flex items-center justify-between gap-4 ${isUnavailable ? 'opacity-50 grayscale' : ''}`}>
+                                <div key={ticket.id || ticket.type || idx} className={`bg-neutral-800/50 border border-white/10 rounded-xl p-4 flex items-center justify-between gap-4 ${isUnavailable ? 'opacity-50 grayscale' : ''}`}>
                                     <div>
                                         <h4 className="font-bold text-white">{ticket.type}</h4>
                                         <p className="text-xs text-neutral-400">{ticket.description}</p>
@@ -192,7 +188,7 @@ const FloatingTicketButton: React.FC<FloatingTicketButtonProps> = ({
                                 </div>
                             ) : (
                                 <DonationItemSelector 
-                                    key={ticket.type} 
+                                    key={ticket.id || ticket.type || idx} 
                                     item={ticket} 
                                     onChange={onQuantityChange || (() => {})} 
                                     cartItem={cart?.[ticket.type]} 

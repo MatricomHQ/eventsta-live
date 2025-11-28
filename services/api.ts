@@ -30,10 +30,22 @@ const MOCK_USER = {
 // --- API CLIENT ---
 async function request<T>(endpoint: string, options: RequestInit = {}): Promise<T> {
     const token = getToken();
+    
+    // Determine headers
     const headers: any = {
-        'Content-Type': 'application/json',
         ...(options.headers || {}),
     };
+
+    // FIX: Only set Content-Type to application/json if there is a body AND it is not FormData.
+    // Explicitly do NOT set it for DELETE/GET/HEAD/OPTIONS requests that have no body.
+    if (options.body) {
+        if (!(options.body instanceof FormData)) {
+            // Default to JSON if not explicitly set
+            if (!headers['Content-Type']) {
+                headers['Content-Type'] = 'application/json';
+            }
+        }
+    }
 
     if (token) {
         headers['Authorization'] = `Bearer ${token}`;
@@ -45,8 +57,10 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
 
     // LOGGING: REQUEST
     console.log(`[${timestamp}] 📡 [API REQ] ${method} ${url}`);
-    if (options.body) {
+    if (options.body && !(options.body instanceof FormData)) {
         console.log("TX Data:", options.body);
+    } else if (options.body instanceof FormData) {
+        console.log("TX Data: [FormData]");
     }
     
     // Check for mixed content issues early
@@ -62,8 +76,10 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
 
         // LOGGING: RESPONSE
         console.log(`[${timestamp}] 📥 [API RES] ${response.status} ${url}`);
-        if (text) {
+        if (text && text.length < 500) {
              console.log("RX Data:", text);
+        } else if (text) {
+             console.log("RX Data: [Large Response]");
         }
 
         if (!response.ok) {
@@ -120,33 +136,67 @@ async function request<T>(endpoint: string, options: RequestInit = {}): Promise<
     }
 }
 
+// --- FILE UPLOAD ---
+
+export const uploadFile = async (file: File | Blob): Promise<string> => {
+    console.info(`[ACTION] uploadFile: ${file.size} bytes`);
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const res = await request<{ url: string }>('/upload', {
+        method: 'POST',
+        body: formData
+    });
+
+    let fixedUrl = res.url;
+    if (fixedUrl.startsWith('https://api.eventsta.com/') && !fixedUrl.includes(':8181')) {
+        fixedUrl = fixedUrl.replace('https://api.eventsta.com/', 'https://api.eventsta.com:8181/');
+    }
+
+    return fixedUrl;
+};
+
 // --- AUTHENTICATION ---
 
 export const checkUserExists = async (email: string): Promise<boolean> => {
     console.info(`[ACTION] checkUserExists: Checking ${email}`);
-    // REMOVED: try/catch fallback. If API fails, UI should know.
     const res = await request<{ exists: boolean }>(`/auth/check?email=${encodeURIComponent(email)}`);
     return res.exists;
 };
 
 export const registerUser = async (email: string, name: string, role: 'attendee' | 'host', password?: string): Promise<User> => {
     console.info(`[ACTION] registerUser: Registering ${email} as ${role}`);
-    // SECURITY FIX: Always send role as 'USER'. Do not allow frontend to request 'ADMIN'.
-    // Hosts are just users who have created a host profile.
     const res = await request<any>('/auth/register', {
         method: 'POST',
         body: JSON.stringify({ 
             email, 
             password: password || 'placeholder123', 
             name, 
-            role: 'USER' // Enforce USER role
+            role: 'USER' 
         })
     });
+    
     if (res.token) setToken(res.token);
-    return mapApiUserToFrontend(res.user);
+    
+    // Auto-create default host
+    try {
+        const user = mapApiUserToFrontend(res.user);
+        console.info(`[ACTION] registerUser: Auto-creating default host profile for ${user.name}`);
+        const newHost = await createHost(user.id, user.name);
+        
+        // Update user object immediately with new host
+        if (newHost && newHost.id) {
+            user.managedHostIds = [...(user.managedHostIds || []), newHost.id];
+        }
+        return user;
+    } catch (error) {
+        console.error("Failed to auto-create default host profile during registration.", error);
+        // Fallback: fetch full profile to be safe
+        return await getUserProfile();
+    }
 };
 
-export const signIn = async (provider: string, credentials?: string): Promise<User> => {
+export const signIn = async (provider: string, credentials?: string, userInfo?: { name?: string, email?: string }): Promise<User> => {
     console.info(`[ACTION] signIn: Provider ${provider}`);
     if (provider === 'demo' || provider === 'admin') {
         const mockUser = { 
@@ -164,33 +214,55 @@ export const signIn = async (provider: string, credentials?: string): Promise<Us
     if (provider === 'email' && credentials) {
         const parts = credentials.split('|');
         const email = parts[0];
-        // Join back the rest in case password contains pipes
         const password = parts.slice(1).join('|'); 
         bodyPayload = { email, password };
     } else {
-        // Provider flow (e.g. google-one-tap)
         bodyPayload = { 
             password: 'placeholder-provider-login', 
             provider_token: credentials 
         };
+        // Add extracted name/email if available to help backend (fallback for token parsing)
+        if (userInfo) {
+            if (userInfo.name) bodyPayload.name = userInfo.name;
+            if (userInfo.email) bodyPayload.email = userInfo.email;
+        }
     }
 
     const res = await request<any>('/auth/login', {
         method: 'POST',
         body: JSON.stringify(bodyPayload) 
     });
+    
     if (res.token) setToken(res.token);
-    return mapApiUserToFrontend(res.user);
+    
+    // CRITICAL FIX: The basic login response often lacks 'promoStats' and other enriched fields.
+    // We must fetch the full user profile immediately to ensure the UI (especially Promotions Portal) works correctly.
+    try {
+        const userProfile = await getUserProfile();
+        
+        // AUTO-CREATE HOST FIX: If user has no host profile, create one.
+        if (userProfile.managedHostIds.length === 0) {
+             console.info(`[ACTION] signIn: Auto-creating default host profile for ${userProfile.name}`);
+             try {
+                 const newHost = await createHost(userProfile.id, userProfile.name);
+                 // Manually update the local profile object so we don't have to fetch again
+                 userProfile.managedHostIds = [newHost.id];
+             } catch (hostErr) {
+                 console.warn("Failed to auto-create host on login", hostErr);
+             }
+        }
+        
+        return userProfile;
+    } catch (e) {
+        console.warn("Failed to fetch full profile after login, using basic response", e);
+        return mapApiUserToFrontend(res.user);
+    }
 };
 
 export const loginWithPassword = async (email: string, password: string): Promise<User> => {
     console.info(`[ACTION] loginWithPassword: ${email}`);
-    const res = await request<any>('/auth/login', {
-        method: 'POST',
-        body: JSON.stringify({ email, password })
-    });
-    if (res.token) setToken(res.token);
-    return mapApiUserToFrontend(res.user);
+    // This is essentially an alias for signIn('email'), redirecting there to maintain single logic path
+    return signIn('email', `${email}|${password}`);
 };
 
 export const getUserProfile = async (): Promise<User> => {
@@ -199,15 +271,88 @@ export const getUserProfile = async (): Promise<User> => {
     
     let promoStats: PromoStat[] = [];
     try {
-        promoStats = await request<PromoStat[]>('/promotions/mine');
+        const rawPromos = await request<any[]>('/promotions/mine');
+        
+        // 1. Fetch missing event data if needed to enrich promotions
+        const eventIds = [...new Set(rawPromos.map((p: any) => p.event_id || p.eventId))];
+        let eventsMap: Record<string, Event> = {};
+        
+        if (eventIds.length > 0) {
+            try {
+                const events = await getEventsByIds(eventIds);
+                events.forEach(e => eventsMap[e.id] = e);
+            } catch (e) {
+                console.warn("Could not fetch events for promotions enrichment");
+            }
+        }
+
+        // 2. Map raw promos to PromoStat
+        promoStats = rawPromos.map((raw: any) => {
+            const evtId = raw.event_id || raw.eventId;
+            const event = eventsMap[evtId];
+            
+            // Extract code. Fallback to extracting from link or ID if absolutely necessary.
+            let promoCode = raw.code || raw.promo_code;
+            
+            if (!promoCode && (raw.link || raw.promoLink)) {
+                // Try to extract from existing link if it exists
+                try {
+                    const urlStr = raw.link || raw.promoLink;
+                    // Simple regex to grab promo=CODE
+                    const match = urlStr.match(/[?&]promo=([^&]+)/);
+                    if (match) promoCode = match[1];
+                } catch (e) { /* ignore */ }
+            }
+
+            // Client-side Link Construction
+            // We ignore backend 'link' if we can construct a better one to ensure it matches current domain and SEO structure
+            let finalLink = raw.link || raw.promoLink || '';
+            const titleForSlug = event?.title || raw.event_title || raw.eventName || 'event';
+            
+            // If we have a code and valid IDs, we construct the canonical frontend link.
+            // This is preferred over whatever the backend sends in 'link', as frontend knows the routing best.
+            if (promoCode && evtId && typeof window !== 'undefined') {
+                 const slug = createEventSlug(titleForSlug, evtId);
+                 finalLink = `${window.location.origin}/#/event/${slug}?promo=${promoCode}`;
+            }
+
+            return {
+                eventId: evtId,
+                eventName: raw.event_title || raw.eventName || event?.title || 'Unknown Event',
+                promoLink: finalLink,
+                clicks: raw.clicks || 0, 
+                sales: raw.sales_count || raw.sales || 0,
+                commissionPct: raw.commission_rate || event?.commission || 0, 
+                earned: typeof raw.earned_amount === 'number' 
+                    ? raw.earned_amount 
+                    : typeof raw.earned === 'number' 
+                        ? raw.earned 
+                        : (raw.sales_volume && event?.commission) 
+                            ? (raw.sales_volume * (event.commission / 100)) 
+                            : 0,
+                status: raw.status || 'active'
+            };
+        });
+
     } catch (e) {
         console.warn("[WARN] Failed to load promotions for profile (non-critical)", e);
     }
     
     let payouts: Payout[] = [];
-    // If we have other non-critical endpoints, we can try/catch them individually, but 'me' must succeed.
     
     return mapApiUserToFrontend(me, promoStats, payouts);
+};
+
+// NEW: End-user Payout Requests (Not Admin)
+export const getUserPayoutRequests = async (): Promise<PayoutRequest[]> => {
+    console.info(`[ACTION] getUserPayoutRequests`);
+    try {
+        return await request<PayoutRequest[]>('/payouts/mine');
+    } catch (e) {
+        // Fallback for demo or if endpoint doesn't exist yet
+        console.warn("Failed to fetch user payout requests, returning empty.", e);
+        return [];
+    }
 };
 
 export const getUsersByIds = async (ids: string[]): Promise<User[]> => {
@@ -233,18 +378,105 @@ export const getEventDetails = async (id: string): Promise<Event> => {
 
 export const createEvent = async (userId: string, hostId: string, eventData: Partial<Event>): Promise<Event> => {
     console.info(`[ACTION] createEvent: User ${userId} creating event for Host ${hostId}`);
+    
+    const backendPayload = {
+        host_id: hostId,
+        title: eventData.title,
+        description: eventData.description,
+        location: eventData.location,
+        start_time: eventData.date, // STRICT: Backend requires start_time, rejects start_date
+        end_time: eventData.endDate, // STRICT: Backend requires end_time, rejects end_date
+        type: eventData.type ? eventData.type.toUpperCase() : 'TICKETED',
+        images: eventData.imageUrls || [],
+        commission_rate: eventData.commission,
+        promo_discount_rate: eventData.defaultPromoDiscount,
+        inventory: eventData.tickets?.map(t => ({
+            type: t.type,
+            price: t.price,
+            quantity_total: t.quantity || 100, 
+            min_donation: t.minimumDonation,
+            description: t.description
+        })) || [],
+        addOns: eventData.addOns?.map(a => ({
+            name: a.name,
+            price: a.price,
+            quantity_total: 1000, 
+            description: a.description
+        })) || [],
+        schedule: eventData.schedule || [],
+        venueAreas: eventData.venueAreas || [],
+        status: eventData.status // Pass status (DRAFT/PUBLISHED)
+    };
+
     const res = await request<any>('/events', {
         method: 'POST',
-        body: JSON.stringify({ ...eventData, host_id: hostId })
+        body: JSON.stringify(backendPayload)
     });
-    return mapApiEventToFrontend(res);
+    
+    const mappedEvent = mapApiEventToFrontend(res);
+    
+    // Fallback: If backend response didn't include the host name (due to lack of join), 
+    // manually inject it from the input data to ensure UI consistency immediately after creation.
+    if ((!mappedEvent.hostName || mappedEvent.hostName === 'Host') && eventData.hostName) {
+        mappedEvent.hostName = eventData.hostName;
+    }
+    
+    return mappedEvent;
 };
 
 export const updateEvent = async (userId: string, eventId: string, updates: Partial<Event>): Promise<Event> => {
     console.info(`[ACTION] updateEvent: Updating ${eventId}`);
+    
+    // Map frontend keys to backend keys for PATCH
+    const payload: any = { ...updates };
+    
+    if (updates.date) {
+        payload.start_time = updates.date;
+        delete payload.date;
+    }
+    if (updates.endDate) {
+        payload.end_time = updates.endDate;
+        delete payload.endDate;
+    }
+    
+    // SAFETY: Explicitly remove start_date/end_date if they somehow slipped in via 'updates' spread
+    // The backend will reject request with 400 if these legacy keys are present.
+    if ('start_date' in payload) delete payload.start_date;
+    if ('end_date' in payload) delete payload.end_date;
+
+    if (updates.imageUrls) {
+        payload.images = updates.imageUrls;
+        delete payload.imageUrls;
+    }
+    if (updates.commission !== undefined) {
+        payload.commission_rate = updates.commission;
+        delete payload.commission;
+    }
+    if (updates.defaultPromoDiscount !== undefined) {
+        payload.promo_discount_rate = updates.defaultPromoDiscount;
+        delete payload.defaultPromoDiscount;
+    }
+    if (updates.hostId) {
+        payload.host_id = updates.hostId;
+        delete payload.hostId;
+    }
+    
+    // Map inventory if present
+    if (updates.tickets) {
+        payload.inventory = updates.tickets.map(t => ({
+            id: t.id,
+            type: t.type,
+            price: t.price,
+            quantity_total: t.quantity,
+            min_donation: t.minimumDonation,
+            description: t.description
+        }));
+        delete payload.tickets;
+    }
+
     const res = await request<any>(`/events/${eventId}`, {
         method: 'PATCH',
-        body: JSON.stringify(updates)
+        body: JSON.stringify(payload)
     });
     return mapApiEventToFrontend(res);
 };
@@ -262,6 +494,12 @@ export const getOtherEventsByHost = async (hostId: string, excludeEventId: strin
     return events.map(mapApiEventToFrontend);
 };
 
+export const getEventsByHost = async (hostId: string): Promise<Event[]> => {
+    console.info(`[ACTION] getEventsByHost: Fetching all events for host ${hostId}`);
+    const events = await request<any[]>(`/events?host_id=${hostId}`);
+    return events.map(mapApiEventToFrontend);
+};
+
 // --- TICKETING & ORDERS ---
 
 export const purchaseTicket = async (userId: string, eventId: string, cart: CheckoutCart, recipientUserId?: string, promoCode?: string, fees?: any): Promise<void> => {
@@ -275,6 +513,11 @@ export const purchaseTicket = async (userId: string, eventId: string, cart: Chec
 export const getOrdersForEvent = async (eventId: string): Promise<Order[]> => {
     console.info(`[ACTION] getOrdersForEvent: Fetching orders for ${eventId}`);
     return await request<Order[]>(`/events/${eventId}/orders`);
+};
+
+export const getUserOrders = async (): Promise<Order[]> => {
+    console.info(`[ACTION] getUserOrders: Fetching orders for current user`);
+    return await request<Order[]>('/orders/mine');
 };
 
 export const validateTicket = async (eventId: string, ticketData: string): Promise<{valid: boolean, message: string, ticket?: any}> => {
@@ -294,18 +537,20 @@ export const checkInTicket = async (eventId: string, ticketId: string): Promise<
 
 export const getHostDetails = async (id: string): Promise<Host> => {
     console.info(`[ACTION] getHostDetails: Fetching ${id}`);
-    return await request<Host>(`/hosts/${id}`);
+    const raw = await request<any>(`/hosts/${id}`);
+    return mapApiHostToFrontend(raw);
 };
 
 export const getHostsByIds = async (ids: string[]): Promise<Host[]> => {
     console.info(`[ACTION] getHostsByIds: Fetching ${ids.length} hosts`);
-    return await request<Host[]>(`/hosts?ids=${ids.join(',')}`);
+    const rawHosts = await request<any[]>(`/hosts?ids=${ids.join(',')}`);
+    return rawHosts.map(mapApiHostToFrontend);
 };
 
 export const createHost = async (userId: string, name: string): Promise<Host> => {
     console.info(`[ACTION] createHost: User ${userId} creating host "${name}"`);
     const res = await request<any>('/hosts', { method: 'POST', body: JSON.stringify({ name }) });
-    return res;
+    return mapApiHostToFrontend(res);
 };
 
 export const getHostReviews = async (hostId: string): Promise<Review[]> => { 
@@ -323,7 +568,6 @@ export const createHostReview = async (hostId: string, review: any): Promise<voi
 export const getSystemStats = async () => { 
     console.info(`[ACTION] getSystemStats`);
     const raw = await request<any>('/admin/stats'); 
-    // Safely map snake_case or missing fields to ensure UI doesn't crash
     return {
         totalUsers: raw.totalUsers || raw.total_users || 0,
         totalEvents: raw.totalEvents || raw.total_events || 0,
@@ -338,14 +582,10 @@ export const getAllUsersAdmin = async (page: number, limit: number, search: stri
 export const getSystemSettings = async (): Promise<SystemSettings> => {
     console.info(`[ACTION] getSystemSettings`);
     const raw = await request<any>('/system/settings');
-    
-    // Helper to safely parse numbers and handle NaN/null/undefined
     const parseNum = (val: any, fallback: number) => {
         const n = parseFloat(val);
         return isNaN(n) ? fallback : n;
     };
-
-    // Map snake_case to camelCase
     return {
         platformName: raw.platformName || raw.platform_name || 'Eventsta',
         supportEmail: raw.supportEmail || raw.support_email || '',
@@ -381,18 +621,26 @@ function parseImages(input: any): string[] {
 }
 
 function mapApiUserToFrontend(apiUser: any, promoStats: PromoStat[] = [], payouts: Payout[] = []): User {
-    // STRICT SECURITY CHECK:
-    // Only map to System Admin if the backend explicitly sets the boolean flag `isSystemAdmin`
-    // or if the role is specifically 'SUPER_ADMIN'.
-    // Do NOT strictly trust `role: 'ADMIN'` as legacy/bad logic might set that for Hosts.
     const isActuallyAdmin = apiUser.isSystemAdmin === true || apiUser.role === 'SUPER_ADMIN';
+
+    // Safely map tickets handling missing fields and snake_case
+    const mappedTickets: PurchasedTicket[] = (apiUser.purchasedTickets || []).map((t: any) => ({
+        id: t.id || uuidv4(),
+        orderId: t.order_id || t.orderId || 'unknown_order',
+        eventId: t.event_id || t.eventId || '',
+        eventName: t.event_name || t.eventName || 'Event',
+        ticketType: t.ticket_type || t.ticketType || 'Ticket',
+        inventoryId: t.inventory_id || t.inventoryId,
+        qty: t.qty || 1, // Default to 1 as the backend tends to send individual items
+        purchaseDate: t.purchased_at || t.purchaseDate || new Date().toISOString()
+    }));
 
     return {
         id: apiUser.id,
         name: apiUser.name,
         email: apiUser.email,
         managedHostIds: apiUser.managedHostIds || [],
-        purchasedTickets: apiUser.purchasedTickets || [],
+        purchasedTickets: mappedTickets,
         promoStats: promoStats,
         payouts: payouts,
         isSystemAdmin: isActuallyAdmin,
@@ -416,41 +664,120 @@ function mapApiEventToFrontend(apiEvent: any): Event {
         venueAreas = apiEvent.venueAreas;
     }
 
-    return {
-        id: apiEvent.id,
-        title: apiEvent.title,
-        hostId: apiEvent.hostId || apiEvent.host_id,
-        hostName: apiEvent.hostName || "Host",
-        date: apiEvent.date || apiEvent.start_date,
-        endDate: apiEvent.endDate || apiEvent.end_date || apiEvent.date,
-        location: apiEvent.location || 'TBD',
-        imageUrls: parseImages(apiEvent.imageUrls || apiEvent.images),
-        description: apiEvent.description || '',
-        commission: apiEvent.commission || apiEvent.commission_rate || 0,
-        defaultPromoDiscount: apiEvent.defaultPromoDiscount || apiEvent.promo_discount_rate || 0,
-        type: (apiEvent.type?.toLowerCase() as 'ticketed' | 'fundraiser') || 'ticketed',
-        status: apiEvent.status || 'DRAFT',
-        tickets: (apiEvent.inventory || []).map((inv: any) => ({
+    // Deduplicate tickets based on ID
+    const rawInventory = apiEvent.inventory || [];
+    const uniqueTicketIds = new Set();
+    const tickets = [];
+
+    for (const inv of rawInventory) {
+        if (inv.id && uniqueTicketIds.has(inv.id)) {
+            continue;
+        }
+        if (inv.id) uniqueTicketIds.add(inv.id);
+        
+        tickets.push({
             id: inv.id,
             type: inv.type,
             price: inv.price,
             quantity: inv.quantity_total,
             sold: inv.quantity_sold,
             minimumDonation: inv.min_donation
-        })),
+        });
+    }
+
+    // Map forms explicitly to handle casing
+    const forms = (apiEvent.forms || []).map((f: any) => ({
+        id: f.id,
+        title: f.title,
+        description: f.description,
+        headerImageUrl: f.headerImageUrl || f.header_image_url,
+        elements: f.elements || [],
+        isActive: f.isActive ?? f.is_active ?? true,
+        responsesCount: f.responsesCount ?? f.responses_count ?? 0,
+        lastUpdated: f.lastUpdated || f.last_updated || new Date().toISOString(),
+        linkedCompetitionId: f.linkedCompetitionId || f.linked_competition_id
+    }));
+
+    // FIX: Map competitions explicitly to handle snake_case from backend
+    const competitions = (apiEvent.competitions || []).map((c: any) => ({
+        id: c.id,
+        type: c.type || 'DJ_TICKET_SALES',
+        status: c.status || 'SETUP',
+        name: c.name,
+        description: c.description,
+        sectionIds: c.sectionIds || c.section_ids || [],
+        competitorIds: c.competitorIds || c.competitor_ids || [],
+        startDate: c.startDate || c.start_date || new Date().toISOString(),
+        cutoffDate: c.cutoffDate || c.cutoff_date || new Date().toISOString(),
+        promoDiscountPercent: c.promoDiscountPercent || c.promo_discount_percent || 0,
+        winnerIds: c.winnerIds || c.winner_ids || []
+    }));
+
+    return {
+        id: apiEvent.id,
+        title: apiEvent.title,
+        hostId: apiEvent.hostId || apiEvent.host_id,
+        // Robust checking for host name including snake_case
+        hostName: apiEvent.hostName || apiEvent.host_name || "Host",
+        // Map backend start_time/start_date to frontend 'date'
+        date: apiEvent.start_time || apiEvent.start_date || apiEvent.date, 
+        // Map backend end_time/end_date to frontend 'endDate'
+        endDate: apiEvent.end_time || apiEvent.end_date || apiEvent.endDate || apiEvent.date,
+        location: apiEvent.location || 'TBD',
+        // FIX: Prioritize 'images' as it seems to be the source of truth from backend update,
+        // whereas 'imageUrls' might be stale data from legacy field.
+        imageUrls: parseImages(apiEvent.images || apiEvent.imageUrls),
+        description: apiEvent.description || '',
+        commission: apiEvent.commission || apiEvent.commission_rate || 0,
+        defaultPromoDiscount: apiEvent.defaultPromoDiscount || apiEvent.promo_discount_rate || 0,
+        type: (apiEvent.type?.toLowerCase() as 'ticketed' | 'fundraiser') || 'ticketed',
+        status: apiEvent.status || 'DRAFT',
+        tickets: tickets,
         addOns: apiEvent.addOns || [],
         venueAreas: venueAreas,
         schedule: schedule,
-        competitions: apiEvent.competitions || [],
-        forms: apiEvent.forms || [],
+        competitions: competitions, // Use mapped competitions
+        forms: forms,
         checkIns: apiEvent.checkIns || {}
+    };
+}
+
+function mapApiHostToFrontend(apiHost: any): Host {
+    const parseBool = (val: any) => {
+        if (typeof val === 'boolean') return val;
+        if (typeof val === 'string') return val.toLowerCase() === 'true';
+        return !!val;
+    };
+
+    return {
+        id: apiHost.id,
+        name: apiHost.name,
+        ownerUserId: apiHost.ownerUserId || apiHost.owner_user_id,
+        eventIds: apiHost.eventIds || apiHost.event_ids || [],
+        reviews: apiHost.reviews || [],
+        description: apiHost.description || '',
+        imageUrl: apiHost.imageUrl || apiHost.image_url,
+        coverImageUrl: apiHost.coverImageUrl || apiHost.cover_image_url,
+        isDefault: parseBool(apiHost.isDefault ?? apiHost.is_default),
+        reviewsEnabled: parseBool(apiHost.reviewsEnabled ?? apiHost.reviews_enabled)
     };
 }
 
 // --- REMAINING EXPORTS ---
 export const getReportData = async (eventId: string): Promise<ReportData> => {
     console.info(`[ACTION] getReportData: ${eventId}`);
-    return await request<ReportData>(`/events/${eventId}/report`);
+    const raw = await request<any>(`/events/${eventId}/report`);
+    return {
+        event: mapApiEventToFrontend(raw.event || {}),
+        kpis: {
+            grossSales: raw.kpis?.grossSales || 0,
+            ticketsSold: raw.kpis?.ticketsSold || 0,
+            pageViews: raw.kpis?.pageViews || 0,
+            promoterSales: raw.kpis?.promoterSales || 0
+        },
+        salesByTicketType: Array.isArray(raw.salesByTicketType) ? raw.salesByTicketType : [],
+        promotions: Array.isArray(raw.promotions) ? raw.promotions : []
+    };
 };
 export const generateEventDescription = async (title: string, current: string) => {
     console.info(`[ACTION] generateEventDescription: ${title}`);
@@ -469,8 +796,9 @@ export const requestEarlyPayout = async (userId: string, amount: number) => {
     console.info(`[ACTION] requestEarlyPayout: ${userId} for $${amount}`);
     return await request<any>('/payouts/request', { method: 'POST', body: JSON.stringify({ amount }) });
 };
+// Admin Only
 export const getPayoutRequests = async (): Promise<PayoutRequest[]> => {
-    console.info(`[ACTION] getPayoutRequests`);
+    console.info(`[ACTION] getPayoutRequests (Admin)`);
     return await request<PayoutRequest[]>('/admin/payouts');
 };
 export const getEmailCampaigns = () => {
@@ -495,15 +823,16 @@ export const getSystemEmailTemplate = (t: SystemEmailTrigger) => {
 };
 export const updateSystemEmailTemplate = (t: SystemEmailTrigger, data: any) => {
     console.info(`[ACTION] updateSystemEmailTemplate: ${t}`);
-    return request(`/admin/email/system-templates/${t}`, { method: 'PUT', body: JSON.stringify(data) });
+    return request<SystemEmailTemplate>(`/admin/email/system-templates/${t}`, { method: 'PUT', body: JSON.stringify(data) });
 };
 export const deleteHost = (userId: string, hostId: string) => {
     console.info(`[ACTION] deleteHost: ${hostId}`);
     return request(`/hosts/${hostId}`, { method: 'DELETE' });
 };
-export const updateHostDetails = (id: string, data: Partial<Host>) => {
+export const updateHostDetails = async (id: string, data: Partial<Host>) => {
     console.info(`[ACTION] updateHostDetails: ${id}`);
-    return request<Host>(`/hosts/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+    const res = await request<any>(`/hosts/${id}`, { method: 'PATCH', body: JSON.stringify(data) });
+    return mapApiHostToFrontend(res);
 };
 export const getProfileForView = (id: string) => {
     console.info(`[ACTION] getProfileForView: ${id}`);
@@ -533,17 +862,39 @@ export const createPromoCode = (userId: string, eventId: string, data: any) => {
     console.info(`[ACTION] createPromoCode: Event ${eventId}`);
     return request<PromoCode>(`/events/${eventId}/promocodes`, { method: 'POST', body: JSON.stringify(data) });
 };
+export const validatePromoCode = async (eventId: string, code: string): Promise<{ valid: boolean, discountPercent: number, code: string }> => {
+    console.info(`[ACTION] validatePromoCode: ${code} for ${eventId}`);
+    return await request<{ valid: boolean, discountPercent: number, code: string }>(`/events/${eventId}/promocodes/validate`, {
+        method: 'POST',
+        body: JSON.stringify({ code })
+    });
+};
 export const deletePromoCode = (userId: string, eventId: string, codeId: string) => {
     console.info(`[ACTION] deletePromoCode: ${codeId}`);
     return request<{ success: boolean }>(`/events/${eventId}/promocodes/${codeId}`, { method: 'DELETE' });
 };
-export const getCompetitionLeaderboard = (eventId: string) => {
+export const getCompetitionLeaderboard = async (eventId: string): Promise<LeaderboardEntry[]> => {
     console.info(`[ACTION] getCompetitionLeaderboard: ${eventId}`);
-    return request<LeaderboardEntry[]>(`/competitions/${eventId}/leaderboard`); 
+    const rawData = await request<any[]>(`/competitions/${eventId}/leaderboard`);
+    
+    // MAP: Backend snake_case -> Frontend camelCase (LeaderboardEntry)
+    return rawData.map(item => ({
+        userId: item.user_id,
+        userName: item.user_name || item.name || 'Unknown User', // Fallback for name
+        salesCount: item.sales_count || 0,
+        salesValue: item.sales_volume || 0,
+        lastSaleDate: item.last_sale_date 
+    }));
 };
-export const joinCompetition = (userId: string, event: Event) => {
-    console.info(`[ACTION] joinCompetition: User ${userId} -> Event ${event.id}`);
-    return request('/promotions/join', { method: 'POST', body: JSON.stringify({ event_id: event.id }) });
+export const joinCompetition = (userId: string, event: Event, competitionId?: string) => {
+    console.info(`[ACTION] joinCompetition: User ${userId} -> Event ${event.id} ${competitionId ? `(Comp: ${competitionId})` : ''}`);
+    return request('/promotions/join', { 
+        method: 'POST', 
+        body: JSON.stringify({ 
+            event_id: event.id,
+            competition_id: competitionId 
+        }) 
+    });
 };
 export const startPromotion = (userId: string, event: Event) => {
     console.info(`[ACTION] startPromotion: User ${userId} -> Event ${event.id}`);
@@ -565,9 +916,17 @@ export const getFormResponses = (formId: string) => {
     console.info(`[ACTION] getFormResponses: ${formId}`);
     return request<any[]>(`/forms/${formId}/responses`);
 };
-export const getHostFinancials = (userId: string) => {
+export const getHostFinancials = async (userId: string): Promise<HostFinancials> => {
     console.info(`[ACTION] getHostFinancials: ${userId}`);
-    return request<HostFinancials>(`/users/${userId}/financials`);
+    const raw = await request<any>(`/users/${userId}/financials`);
+    return {
+        grossVolume: typeof raw.grossVolume === 'number' ? raw.grossVolume : 0,
+        platformFees: typeof raw.platformFees === 'number' ? raw.platformFees : 0,
+        netRevenue: typeof raw.netRevenue === 'number' ? raw.netRevenue : 0,
+        pendingBalance: typeof raw.pendingBalance === 'number' ? raw.pendingBalance : (raw.balance || 0),
+        totalPayouts: typeof raw.totalPayouts === 'number' ? raw.totalPayouts : 0,
+        payouts: Array.isArray(raw.payouts) ? raw.payouts : []
+    };
 };
 export const getAllEventsAdmin = async (page: number, limit: number, search: string) => {
     console.info(`[ACTION] getAllEventsAdmin`);
@@ -620,7 +979,6 @@ export const getAllArtists = () => {
 };
 export const getMockLocations = () => {
     console.info(`[ACTION] getMockLocations`);
-    // Previously mocked, now requesting real backend location hints if available
     return request<string[]>('/locations');
 };
 export const getRawEvent = (id: string) => {
@@ -630,4 +988,14 @@ export const getRawEvent = (id: string) => {
 export const finalizeCompetition = (userId: string, eventId: string, compId: string) => {
     console.info(`[ACTION] finalizeCompetition: ${compId}`);
     return request(`/competitions/${eventId}/${compId}/finalize`, { method: 'POST' });
+};
+
+// NEW: Track Promo Link Click
+export const trackPromoClick = async (eventId: string, code: string): Promise<void> => {
+    console.info(`[ACTION] trackPromoClick: ${code} for ${eventId}`);
+    // Fire and forget, no return value needed for frontend logic
+    request(`/promotions/track-click`, {
+        method: 'POST',
+        body: JSON.stringify({ event_id: eventId, code })
+    }).catch(err => console.warn("Failed to track promo click", err));
 };

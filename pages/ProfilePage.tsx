@@ -10,18 +10,6 @@ import { SaveIcon, CheckCircleIcon, UploadCloudIcon, UserIcon } from '../compone
 import AddSectionBar from '../components/AddSectionBar';
 import SectionEditor from '../components/SectionEditor';
 
-
-// Utility to read a file and convert it to a Data URL (base64)
-const fileToDataUrl = (file: File): Promise<string> => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-};
-
-
 const ProfilePage: React.FC = () => {
     const { id } = useParams<{ id: string }>();
     const { user: currentUser } = useAuth();
@@ -35,6 +23,9 @@ const ProfilePage: React.FC = () => {
     
     const [isSaving, setIsSaving] = useState(false);
     const [saveSuccess, setSaveSuccess] = useState(false);
+    
+    // Upload state tracking
+    const [uploadingField, setUploadingField] = useState<'header' | 'profile' | null>(null);
 
     // Refs for file inputs and drag-and-drop
     const headerInputRef = useRef<HTMLInputElement>(null);
@@ -77,15 +68,31 @@ const ProfilePage: React.FC = () => {
 
     const handleImageChange = async (event: React.ChangeEvent<HTMLInputElement>, type: 'header' | 'profile') => {
         const file = event.target.files?.[0];
-        if (file) {
-            try {
-                const dataUrl = await fileToDataUrl(file);
-                const field = type === 'header' ? 'headerImageUrl' : 'profileImageUrl';
-                handleProfileChange({ [field]: dataUrl });
-            } catch (error) {
-                console.error("Error reading file:", error);
-                alert("Could not load image. Please try another file.");
-            }
+        if (!file) return;
+
+        // 1. Instant Preview with Object URL
+        const objectUrl = URL.createObjectURL(file);
+        const field = type === 'header' ? 'headerImageUrl' : 'profileImageUrl';
+        
+        // Update local state with preview
+        handleProfileChange({ [field]: objectUrl });
+        
+        // Set uploading state
+        setUploadingField(type);
+
+        try {
+            // 2. Upload file
+            const uploadedUrl = await api.uploadFile(file);
+            // 3. Update state with remote URL
+            handleProfileChange({ [field]: uploadedUrl });
+        } catch (error) {
+            console.error("Image upload failed", error);
+            alert("Failed to upload image. Please try again.");
+        } finally {
+            setUploadingField(null);
+            // Reset input
+            if (type === 'header' && headerInputRef.current) headerInputRef.current.value = '';
+            if (type === 'profile' && profileInputRef.current) profileInputRef.current.value = '';
         }
     };
     
@@ -149,6 +156,12 @@ const ProfilePage: React.FC = () => {
     
     const handleSave = async () => {
         if (!id || !editedProfile) return;
+        
+        if (uploadingField) {
+            alert("Please wait for images to finish uploading.");
+            return;
+        }
+
         setIsSaving(true);
         setSaveSuccess(false);
         try {
@@ -218,13 +231,18 @@ const ProfilePage: React.FC = () => {
                             <>
                                 <div 
                                     onClick={() => headerInputRef.current?.click()}
-                                    className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer"
+                                    className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer z-10"
                                 >
                                     <div className="text-center text-white p-4 bg-black/30 rounded-lg backdrop-blur-sm border border-white/10">
                                         <UploadCloudIcon className="w-10 h-10 mx-auto" />
                                         <p className="font-semibold mt-2">Change Header Image</p>
                                     </div>
                                 </div>
+                                {uploadingField === 'header' && (
+                                    <div className="absolute inset-0 bg-black/60 flex items-center justify-center z-20 pointer-events-none">
+                                        <div className="w-12 h-12 border-4 border-white border-t-transparent rounded-full animate-spin"></div>
+                                    </div>
+                                )}
                                 <input
                                     ref={headerInputRef}
                                     type="file"
@@ -249,13 +267,18 @@ const ProfilePage: React.FC = () => {
                                     <>
                                         <div 
                                             onClick={() => profileInputRef.current?.click()}
-                                            className="absolute inset-0 bg-black/70 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer text-center text-white"
+                                            className="absolute inset-0 bg-black/70 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center cursor-pointer text-center text-white z-10"
                                         >
                                             <div>
                                                 <UploadCloudIcon className="w-8 h-8 mx-auto"/>
                                                 <p className="text-xs font-semibold mt-1">Change</p>
                                             </div>
                                         </div>
+                                        {uploadingField === 'profile' && (
+                                            <div className="absolute inset-0 bg-black/60 flex items-center justify-center z-20 pointer-events-none">
+                                                <div className="w-8 h-8 border-4 border-white border-t-transparent rounded-full animate-spin"></div>
+                                            </div>
+                                        )}
                                         <input
                                             ref={profileInputRef}
                                             type="file"
@@ -284,7 +307,7 @@ const ProfilePage: React.FC = () => {
                             {isOwner && (
                                 <div className="mt-4 md:ml-auto flex items-center gap-4 flex-shrink-0">
                                     {isEditing && (
-                                        <button onClick={handleSave} disabled={isSaving || saveSuccess} className="px-5 py-2 text-sm font-semibold rounded-full transition-all duration-300 flex items-center justify-center min-w-[100px] bg-green-600 text-white hover:bg-green-500 shadow-lg shadow-green-500/20 disabled:bg-neutral-700 disabled:text-neutral-500 disabled:shadow-none">
+                                        <button onClick={handleSave} disabled={isSaving || saveSuccess || !!uploadingField} className="px-5 py-2 text-sm font-semibold rounded-full transition-all duration-300 flex items-center justify-center min-w-[100px] bg-green-600 text-white hover:bg-green-500 shadow-lg shadow-green-500/20 disabled:bg-neutral-700 disabled:text-neutral-500 disabled:shadow-none">
                                             {isSaving ? 'Saving...' : saveSuccess ? <><CheckCircleIcon className="w-5 h-5 mr-2"/>Saved!</> : <><SaveIcon className="w-4 h-4 mr-2"/>Save</>}
                                         </button>
                                     )}

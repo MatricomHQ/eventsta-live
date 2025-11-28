@@ -3,7 +3,7 @@ import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react'
 import { useParams, Link, useLocation } from 'react-router-dom';
 import * as api from '../services/api';
 import { Event as EventType, CheckoutCart, User, PromoCode, Competition } from '../types';
-import { CalendarIcon, MapPinIcon, SettingsIcon, MegaphoneIcon, ClipboardIcon, MinusIcon, PlusIcon, PackageIcon, EyeIcon, ArrowLeftIcon, ClockIcon, ArrowRightIcon, UserIcon } from '../components/Icons';
+import { CalendarIcon, MapPinIcon, SettingsIcon, MegaphoneIcon, ClipboardIcon, MinusIcon, PlusIcon, PackageIcon, EyeIcon, ArrowLeftIcon, ClockIcon, ArrowRightIcon, UserIcon, CheckCircleIcon } from '../components/Icons';
 import QuantitySelector from '../components/QuantitySelector';
 import { useAuth } from '../contexts/AuthContext';
 import SignInModal from '../components/SignInModal';
@@ -46,7 +46,9 @@ const EventDetails: React.FC = () => {
   // For promo codes
   const [promoCodeInput, setPromoCodeInput] = useState('');
   const [appliedPromoCode, setAppliedPromoCode] = useState<PromoCode | null>(null);
+  const [urlTrackingCode, setUrlTrackingCode] = useState<string>(''); // Tracking-only code fallback
   const [promoError, setPromoError] = useState('');
+  // Only admins need the full list
   const [eventPromoCodes, setEventPromoCodes] = useState<PromoCode[]>([]);
 
   // For ended events: Related events from host
@@ -57,6 +59,7 @@ const EventDetails: React.FC = () => {
   const mobileFilmstripRef = useRef<HTMLDivElement>(null);
   const desktopFilmstripRef = useRef<HTMLDivElement>(null);
   const ticketSectionRef = useRef<HTMLDivElement>(null);
+  const trackPromoRef = useRef<string | null>(null); // Prevent duplicate tracking
 
   const [isTicketSectionVisible, setIsTicketSectionVisible] = useState(false);
 
@@ -82,21 +85,13 @@ const EventDetails: React.FC = () => {
         const existingPromo = user.promoStats.find(p => p.eventId === event.id && p.status === 'active');
         if (existingPromo) {
             setIsPromoting(true);
-            // Generate a functional link for the demo environment
-            const userCode = eventPromoCodes.find(c => c.ownerUserId === user.id)?.code;
-            if (userCode) {
-                const functionalLink = `${window.location.origin}/#/event/${createEventSlug(event.title, event.id)}?promo=${userCode}`;
-                setPromoLink(functionalLink);
-            } else {
-                // Fallback to constructing it if code object isn't loaded yet but we know the pattern
-                setPromoLink(`${window.location.origin}/#/event/${createEventSlug(event.title, event.id)}`);
-            }
+            setPromoLink(existingPromo.promoLink || `${window.location.origin}/#/event/${createEventSlug(event.title, event.id)}`);
         } else {
             setIsPromoting(false);
             setPromoLink('');
         }
     }
-  }, [user, event, eventPromoCodes]);
+  }, [user, event]);
 
 
   useEffect(() => {
@@ -105,6 +100,17 @@ const EventDetails: React.FC = () => {
       try {
         setIsLoading(true);
         const eventData = await api.getEventDetails(id);
+        
+        // Double check: if host name is generic 'Host' and we have an ID, try fetching host info
+        if ((!eventData.hostName || eventData.hostName === 'Host') && eventData.hostId) {
+            try {
+                const hostData = await api.getHostDetails(eventData.hostId);
+                eventData.hostName = hostData.name;
+            } catch (hostErr) {
+                console.warn("Could not fetch host details to populate name", hostErr);
+            }
+        }
+
         setEvent(eventData);
         if (eventData.competitions && eventData.competitions.length > 0 && eventData.competitions[0].competitorIds.length > 0) {
             // Default to first competitor if none selected
@@ -126,36 +132,66 @@ const EventDetails: React.FC = () => {
         setIsLoading(false);
       }
     };
-    const fetchPromoCodes = async () => {
-        if (id) {
-            const codes = await api.getPromoCodesForEvent(id);
-            setEventPromoCodes(codes);
+    
+    // Only owners should fetch full list of codes
+    const fetchPromoCodesForAdmin = async () => {
+        if (id && isOwner) {
+            try {
+                const codes = await api.getPromoCodesForEvent(id);
+                setEventPromoCodes(codes);
+            } catch (e) {
+                console.warn("Could not fetch promo codes for admin");
+            }
         }
     };
-    fetchEvent();
-    fetchPromoCodes();
-  }, [id]);
 
-  // Handle URL Promo Parameters
+    fetchEvent();
+    if (isOwner) fetchPromoCodesForAdmin();
+  }, [id, isOwner]);
+
+  // Handle URL Promo Parameters & Tracking
   useEffect(() => {
-      if (eventPromoCodes.length > 0) {
+      const handlePromoLogic = async () => {
+          if (!event) return;
           const searchParams = new URLSearchParams(location.search);
           const urlPromo = searchParams.get('promo');
           
           if (urlPromo) {
-              const code = eventPromoCodes.find(c => c.code.toUpperCase() === urlPromo.toUpperCase() && c.isActive);
-              if (code) {
-                  setAppliedPromoCode(code);
-                  setPromoCodeInput(code.code);
-                  
-                  // If this code belongs to a user (competitor), auto-select them in the dropdown
-                  if (code.ownerUserId) {
-                      setSelectedRecipient(code.ownerUserId);
+              // Store tracking code regardless of validation status
+              setUrlTrackingCode(urlPromo);
+
+              // 1. Track Click (Fire and Forget - do not wait for validation)
+              if (trackPromoRef.current !== urlPromo) {
+                  api.trackPromoClick(event.id, urlPromo).catch(e => console.warn("Failed to track promo click", e));
+                  trackPromoRef.current = urlPromo;
+              }
+              
+              try {
+                  // 2. Validate Code (for Discount Logic)
+                  const result = await api.validatePromoCode(event.id, urlPromo);
+                  if (result.valid) {
+                      setAppliedPromoCode({
+                          id: 'validated-code',
+                          eventId: event.id,
+                          code: result.code,
+                          discountPercent: result.discountPercent,
+                          uses: 0,
+                          maxUses: null,
+                          isActive: true
+                      });
+                      setPromoCodeInput(result.code);
+                  } else {
+                      // Code is invalid for discount, but we still keep urlTrackingCode for potential affiliate tracking during checkout
+                      console.log("Promo code not valid for discount, treated as tracking only.");
                   }
+              } catch (e) {
+                  // Ignore validation error from URL param
+                  console.warn("Promo validation failed from URL", e);
               }
           }
-      }
-  }, [location.search, eventPromoCodes]);
+      };
+      handlePromoLogic();
+  }, [location.search, event]);
 
   // PENDING CHECKOUT RESTORATION LOGIC
   useEffect(() => {
@@ -335,22 +371,32 @@ const EventDetails: React.FC = () => {
     return { totalPrice: total, discountAmount: discount, finalPrice: total - discount };
   }, [cart, event, appliedPromoCode]);
 
-  const handleApplyPromoCode = () => {
+  const handleApplyPromoCode = async () => {
+    if (!event) return;
     setPromoError('');
     setAppliedPromoCode(null);
-    const code = eventPromoCodes.find(c => c.code.toUpperCase() === promoCodeInput.toUpperCase() && c.isActive);
-    if (code) {
-        if (code.maxUses !== null && code.uses >= code.maxUses) {
-            setPromoError('This promo code has reached its usage limit.');
+    
+    if (!promoCodeInput) return;
+
+    try {
+        // Use the new public validation endpoint
+        const result = await api.validatePromoCode(event.id, promoCodeInput);
+        if (result.valid) {
+            setAppliedPromoCode({
+                id: 'validated-code', // Dummy ID since we don't need real ID for display
+                eventId: event.id,
+                code: result.code,
+                discountPercent: result.discountPercent,
+                uses: 0,
+                maxUses: null,
+                isActive: true
+            });
+            setPromoCodeInput(result.code);
         } else {
-            setAppliedPromoCode(code);
-            setPromoCodeInput(code.code); // Normalize casing
-            if (code.ownerUserId) {
-                setSelectedRecipient(code.ownerUserId);
-            }
+            setPromoError('Invalid or expired promo code.');
         }
-    } else {
-        setPromoError('Invalid or expired promo code.');
+    } catch (e) {
+        setPromoError("Validation failed. Please try again.");
     }
   };
 
@@ -381,15 +427,14 @@ const EventDetails: React.FC = () => {
     if (!user || !event) return;
     setIsPromotingLoading(true);
     try {
-        const newPromo = await api.startPromotion(user.id, event);
+        const newPromo: any = await api.startPromotion(user.id, event);
         await refreshUser();
         setIsPromoting(true);
         
-        // Generate functional link immediately
-        const userCode = eventPromoCodes.find(c => c.ownerUserId === user.id)?.code 
-            || `PROMO_${user.id.slice(-4)}`; // Fallback if code generation is delayed on backend
-            
-        setPromoLink(`${window.location.origin}/#/event/${createEventSlug(event.title, event.id)}?promo=${userCode}`);
+        // Use returned code or fallback if response doesn't contain code (depends on backend)
+        const code = newPromo.code || newPromo.promo_code || `PROMO_${user.id.slice(0,4)}`;
+        
+        setPromoLink(`${window.location.origin}/#/event/${createEventSlug(event.title, event.id)}?promo=${code}`);
     } catch (error) {
         console.error("Failed to start promotion:", error);
     } finally {
@@ -405,19 +450,14 @@ const EventDetails: React.FC = () => {
     if (!user || !event) return;
     setIsJoiningCompetition(true);
     try {
-        const newPromo = await api.joinCompetition(user.id, event);
+        // Pass the specific competition ID if multiple exist, assuming UI defaults to first/active
+        const targetCompetition = event.competitions?.find(c => c.status === 'ACTIVE') || event.competitions?.[0];
+        const competitionId = targetCompetition ? targetCompetition.id : undefined;
+
+        await api.joinCompetition(user.id, event, competitionId);
         await refreshUser();
         // The user is now a competitor and a promoter
         setIsPromoting(true);
-        
-        // Refresh codes
-        const codes = await api.getPromoCodesForEvent(event.id);
-        setEventPromoCodes(codes);
-        const userCode = codes.find(c => c.ownerUserId === user.id)?.code;
-        
-        if (userCode) {
-            setPromoLink(`${window.location.origin}/#/event/${createEventSlug(event.title, event.id)}?promo=${userCode}`);
-        }
         
         // Refresh event data to include new competitor
         const refreshedEvent = await api.getEventDetails(event.id);
@@ -557,6 +597,17 @@ const EventDetails: React.FC = () => {
             >
                 <div>
                     {isEventEnded && <p className="text-yellow-400 font-bold mb-2 text-glow flex items-center gap-2"><ClockIcon className="w-4 h-4" /> PAST EVENT</p>}
+                    
+                    {/* ENHANCED PROMO BADGE */}
+                    {appliedPromoCode && appliedPromoCode.discountPercent > 0 && event.type === 'ticketed' && !isEventEnded && (
+                        <div className="mb-4 inline-block bg-gradient-to-r from-green-600/30 to-green-500/20 border border-green-500/40 rounded-lg px-4 py-2 backdrop-blur-md shadow-lg shadow-green-900/20 animate-fade-in-up">
+                            <span className="text-base font-bold text-green-300 flex items-center gap-2">
+                                <CheckCircleIcon className="w-5 h-5 text-green-400" />
+                                Deal Unlocked: <span className="text-white">{appliedPromoCode.discountPercent}% Off Tickets</span>
+                            </span>
+                        </div>
+                    )}
+
                     <h1 className="text-4xl font-bold tracking-tighter text-white md:text-7xl">{event.title}</h1>
                     <HostLink 
                         hostId={event.hostId} 
@@ -565,15 +616,6 @@ const EventDetails: React.FC = () => {
                     />
                     
                     <SocialShareButtons url={window.location.href} title={event.title} />
-                    
-                    {/* Discount Applied Badge */}
-                    {appliedPromoCode && event.type === 'ticketed' && !isEventEnded && (
-                        <div className="mt-3 inline-block bg-green-500/20 border border-green-500/30 rounded-full px-3 py-1 backdrop-blur-md animate-fade-in-up">
-                            <span className="text-sm font-bold text-green-400 flex items-center gap-1">
-                                <span>🎉</span> Discount Applied: {appliedPromoCode.discountPercent}% Off Tickets
-                            </span>
-                        </div>
-                    )}
 
                     <div className="mt-6 flex flex-col sm:flex-row sm:items-center sm:space-x-6 text-lg text-neutral-200 space-y-3 sm:space-y-0">
                         <div className="flex items-center space-x-2"><CalendarIcon className="w-5 h-5 text-neutral-400" /><span>{formattedDate}</span></div>
@@ -733,10 +775,10 @@ const EventDetails: React.FC = () => {
                     <div className="bg-neutral-900/50 border border-neutral-800 rounded-2xl p-6 backdrop-blur-md">
                         <h2 className="text-2xl font-bold text-white mb-6">{event.type === 'ticketed' ? 'Select Tickets' : 'Make a Donation'}</h2>
                         <div className="space-y-4 mb-6">
-                            {event.type === 'ticketed' && event.tickets.map(ticket => {
+                            {event.type === 'ticketed' && event.tickets.map((ticket, idx) => {
                                 // Calculate discount for this ticket
-                                const hasDiscount = appliedPromoCode && event.type === 'ticketed';
-                                const discountPct = hasDiscount ? appliedPromoCode.discountPercent : 0;
+                                const hasDiscount = appliedPromoCode && appliedPromoCode.discountPercent > 0 && event.type === 'ticketed';
+                                const discountPct = hasDiscount ? appliedPromoCode!.discountPercent : 0;
                                 const discountedPrice = ticket.price * (1 - discountPct / 100);
                                 
                                 // Check availability
@@ -746,7 +788,7 @@ const EventDetails: React.FC = () => {
                                 const isUnavailable = isSalesEnded || isSoldOut;
 
                                 return (
-                                    <div key={ticket.type} className={`bg-neutral-900 border border-neutral-800 rounded-xl p-5 flex items-center justify-between gap-4 ${isUnavailable ? 'opacity-60 grayscale' : ''}`}>
+                                    <div key={ticket.id || ticket.type || idx} className={`bg-neutral-900 border border-neutral-800 rounded-xl p-5 flex items-center justify-between gap-4 ${isUnavailable ? 'opacity-60 grayscale' : ''}`}>
                                         <div>
                                             <h4 className="text-lg font-semibold text-white">{ticket.type}</h4>
                                             <p className="text-neutral-400 text-sm mb-2">{ticket.description || ''}</p>
@@ -771,8 +813,8 @@ const EventDetails: React.FC = () => {
                                 );
                             })}
                             
-                            {event.type === 'fundraiser' && event.tickets.map(ticket => (
-                                <DonationItemSelector key={ticket.type} item={ticket} onChange={handleQuantityChange} cartItem={cart[ticket.type]} />
+                            {event.type === 'fundraiser' && event.tickets.map((ticket, idx) => (
+                                <DonationItemSelector key={ticket.id || ticket.type || idx} item={ticket} onChange={handleQuantityChange} cartItem={cart[ticket.type]} />
                             ))}
 
                             {event.addOns && event.addOns.length > 0 && (
@@ -844,7 +886,7 @@ const EventDetails: React.FC = () => {
                         <div className="border-t border-neutral-800 mt-6 pt-6">
                             {isCompetitionEvent && !isCompetitor && !isOwner && !isEventEnded && (
                                 <button onClick={handleJoinCompetition} disabled={isJoiningCompetition} className="w-full h-12 px-6 bg-green-500/20 text-green-300 text-sm font-semibold rounded-full hover:bg-green-500/30 hover:text-green-200 transition-colors flex items-center justify-center space-x-2 mb-4">
-                                    <span>Join "{event.competitions?.[0].name}"</span>
+                                    <span>Join "{event.competitions?.find(c => c.status === 'ACTIVE')?.name || event.competitions?.[0].name}"</span>
                                 </button>
                             )}
                             {!isPromoting && !isEventEnded ? (
@@ -882,7 +924,7 @@ const EventDetails: React.FC = () => {
         cart={cart}
         event={event}
         recipientUserId={selectedRecipient}
-        promoCode={appliedPromoCode?.code}
+        promoCode={appliedPromoCode?.code || urlTrackingCode}
         appliedDiscountPercent={appliedPromoCode?.discountPercent}
       />
       {/* Pass necessary props to FloatingTicketButton to enable drawer functionality */}

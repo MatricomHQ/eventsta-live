@@ -40,6 +40,8 @@ const PromotionsContent: React.FC<{ user: User, onUserUpdate: () => void }> = ({
     const [copiedLink, setCopiedLink] = useState<string | null>(null);
     const navigate = useNavigate();
     
+    // Note: User profile already fetches promotions and enriches them in api.ts
+    // eventsMap is mostly redundant if api.ts does its job, but we keep it for competition data
     const [eventsMap, setEventsMap] = useState<Map<string, EventType>>(new Map());
     const [isLoadingEvents, setIsLoadingEvents] = useState(true);
     
@@ -47,12 +49,18 @@ const PromotionsContent: React.FC<{ user: User, onUserUpdate: () => void }> = ({
     const [showEarlyPayoutModal, setShowEarlyPayoutModal] = useState(false);
     const [hasPendingRequest, setHasPendingRequest] = useState(false);
 
+    // Track locally deleted IDs to support optimistic UI updates when API returns stale data
+    const [deletedEventIds, setDeletedEventIds] = useState<string[]>([]);
+
     const { activePromos, currentBalance, totalEarned } = useMemo(() => {
-        const active = user.promoStats.filter(p => p.status === 'active');
+        const active = user.promoStats
+            .filter(p => p.status === 'active')
+            .filter(p => !deletedEventIds.includes(p.eventId)); // Filter out locally deleted items
+
         const balance = active.reduce((sum, p) => sum + p.earned, 0);
         const total = user.promoStats.reduce((sum, p) => sum + p.earned, 0);
         return { activePromos: active, currentBalance: balance, totalEarned: total };
-    }, [user.promoStats]);
+    }, [user.promoStats, deletedEventIds]);
 
      useEffect(() => {
         const fetchEventDetails = async () => {
@@ -79,10 +87,9 @@ const PromotionsContent: React.FC<{ user: User, onUserUpdate: () => void }> = ({
     useEffect(() => {
         const checkPendingPayouts = async () => {
             try {
-                // In a real app, this would be an endpoint like /user/payout-requests
-                // Using the mocked admin endpoint and filtering for the current user
-                const requests = await api.getPayoutRequests();
-                const isPending = requests.some(r => r.userId === user.id && r.status === 'pending');
+                // Use the correct user endpoint, not admin
+                const requests = await api.getUserPayoutRequests();
+                const isPending = requests.some(r => r.status === 'pending');
                 setHasPendingRequest(isPending);
             } catch (e) {
                 console.error("Error checking payout status", e);
@@ -93,9 +100,20 @@ const PromotionsContent: React.FC<{ user: User, onUserUpdate: () => void }> = ({
 
     const handleStopPromotion = async () => {
         if (!promoToStop) return;
-        await api.stopPromotion(user.id, promoToStop.eventId);
-        onUserUpdate(); // Refresh user data
-        setPromoToStop(null);
+        try {
+            await api.stopPromotion(user.id, promoToStop.eventId);
+            
+            // Optimistic Update: Remove from UI immediately
+            setDeletedEventIds(prev => [...prev, promoToStop.eventId]);
+            
+            // Trigger background refresh (even if it returns stale data, our local filter handles it)
+            onUserUpdate(); 
+        } catch (error) {
+            console.error("Failed to stop promotion", error);
+            alert("Failed to stop promotion. Please try again.");
+        } finally {
+            setPromoToStop(null);
+        }
     };
 
     const handleCopyLink = (link: string) => {
@@ -184,6 +202,7 @@ const PromotionsContent: React.FC<{ user: User, onUserUpdate: () => void }> = ({
                 <div className="space-y-6">
                     {activePromos.length > 0 ? (
                         activePromos.map(promo => {
+                             // Use enriched data from promoStats, fallback to map if needed
                              const event = eventsMap.get(promo.eventId);
                              const competition = event?.competitions?.find(c => c.status === 'ACTIVE');
 

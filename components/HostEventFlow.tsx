@@ -3,13 +3,21 @@
 
 
 
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
+
+
+
+
+
+
+
+
+import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import Modal from './Modal';
 import { useAuth } from '../contexts/AuthContext';
 import * as api from '../services/api';
 import { generateEventDescription, generateEventImage } from '../services/geminiService';
-import { WandSparklesIcon, TrashIcon, CheckCircleIcon, ArrowRightIcon, TicketIcon, DollarSignIcon, XIcon, SaveIcon, ShieldCheckIcon } from './Icons';
+import { WandSparklesIcon, TrashIcon, CheckCircleIcon, ArrowRightIcon, TicketIcon, DollarSignIcon, XIcon, SaveIcon, ShieldCheckIcon, UploadCloudIcon } from './Icons';
 import { Event, TicketOption, Host } from '../types';
 
 interface HostEventFlowProps {
@@ -34,7 +42,7 @@ const initialEventData = {
   location: '',
   date: '',
   endDate: '',
-  tickets: [{ id: uuidv4(), type: 'General Admission', price: 10.00, description: '', minimumDonation: 5 }],
+  tickets: [{ id: uuidv4(), type: 'General Admission', price: 10.00, quantity: 100, description: '', minimumDonation: 5 }],
   imageUrls: [''],
   commission: 10,
   defaultPromoDiscount: 5,
@@ -90,11 +98,11 @@ const HostEventFlow: React.FC<HostEventFlowProps> = ({ isOpen, onClose, onEventC
     }
   }, [currentStep, eventData]);
 
-  const handleSubmit = async (status: 'DRAFT' | 'PUBLISHED') => {
+  const handleSubmit = async (targetStatus: 'DRAFT' | 'PUBLISHED') => {
     if (!user || !host || !isStepValid) return;
     setIsSubmitting(true);
     
-    // Construct the final event object for the API
+    // Construct the partial event object for the API
     const finalEventData: Partial<Event> = {
       title: eventData.title,
       description: eventData.description,
@@ -108,16 +116,31 @@ const HostEventFlow: React.FC<HostEventFlowProps> = ({ isOpen, onClose, onEventC
       hostName: host.name,
       type: eventData.type,
       tickets: eventData.tickets.map(({ id, ...rest }) => rest),
-      addOns: [], // Add-ons are not part of the creation flow yet
-      status: status, // Pass the status (DRAFT or PUBLISHED)
+      addOns: [], 
+      // Note: We don't send status here because api.createEvent now handles mapping
+      // and the backend enforces DRAFT on creation anyway.
     };
     
     try {
+      // 1. Create the event (Server always creates as DRAFT)
       const newEvent = await api.createEvent(user.id, host.id, finalEventData);
+      
+      // 2. If user wanted to publish immediately, we must update the status now
+      if (targetStatus === 'PUBLISHED') {
+          try {
+              await api.updateEvent(user.id, newEvent.id, { status: 'PUBLISHED' });
+              newEvent.status = 'PUBLISHED'; // Update local object for UI
+          } catch (pubError) {
+              console.error("Created event but failed to publish:", pubError);
+              alert("Event created but failed to publish. It is saved as a Draft.");
+          }
+      }
+
       onEventCreated(newEvent);
       handleClose();
     } catch (error) {
       console.error("Failed to create event", error);
+      alert((error as Error).message);
     } finally {
       setIsSubmitting(false);
     }
@@ -296,7 +319,7 @@ const Step4Pricing = ({ data, onChange }: any) => {
     const handleTicketChange = (id: string, field: keyof TicketOption, value: any) => {
         const newTickets = data.tickets.map((ticket: any) => {
             if (ticket.id === id) {
-                const isNumericField = field === 'price' || field === 'minimumDonation';
+                const isNumericField = field === 'price' || field === 'minimumDonation' || field === 'quantity';
                 const updatedValue = isNumericField ? (parseFloat(value) || 0) : value;
                 return { ...ticket, [field]: updatedValue };
             }
@@ -306,7 +329,7 @@ const Step4Pricing = ({ data, onChange }: any) => {
     };
 
     const addTicket = () => {
-        const newTicket = { id: uuidv4(), type: '', price: 0, description: '', minimumDonation: 0 };
+        const newTicket = { id: uuidv4(), type: '', price: 0, quantity: 100, description: '', minimumDonation: 0 };
         onChange('tickets', [...data.tickets, newTicket]);
     };
 
@@ -320,8 +343,9 @@ const Step4Pricing = ({ data, onChange }: any) => {
                 <h4 className="text-lg font-bold text-white mb-4">{isFundraiser ? 'Donation Tiers' : 'Ticket Options'}</h4>
                 <div className="hidden md:flex gap-4 px-2 text-xs font-bold text-neutral-500 uppercase tracking-wider">
                     <div className="flex-grow pl-1">Ticket Name</div>
-                    <div className="w-28">{isFundraiser ? 'Suggested' : 'Price'}</div>
-                    {isFundraiser && <div className="w-28">Min. Amount</div>}
+                    <div className="w-24">{isFundraiser ? 'Suggested' : 'Price'}</div>
+                    <div className="w-20">Qty</div>
+                    {isFundraiser && <div className="w-24">Min. Amt</div>}
                     <div className="w-8"></div>
                 </div>
 
@@ -340,7 +364,7 @@ const Step4Pricing = ({ data, onChange }: any) => {
                                     />
                                 </div>
                                 <div className="flex gap-3">
-                                    <div className={`relative ${isFundraiser ? 'w-1/2 md:w-28' : 'w-full md:w-28'}`}>
+                                    <div className={`relative ${isFundraiser ? 'w-1/3 md:w-24' : 'w-1/2 md:w-24'}`}>
                                         <label className="md:hidden text-xs font-bold text-neutral-500 uppercase mb-1.5 block">{isFundraiser ? 'Suggested' : 'Price'}</label>
                                         <div className="relative">
                                             <span className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400">$</span>
@@ -353,8 +377,19 @@ const Step4Pricing = ({ data, onChange }: any) => {
                                             />
                                         </div>
                                     </div>
+                                    <div className={`relative ${isFundraiser ? 'w-1/3 md:w-20' : 'w-1/2 md:w-20'}`}>
+                                        <label className="md:hidden text-xs font-bold text-neutral-500 uppercase mb-1.5 block">Qty</label>
+                                        <input 
+                                            type="number" 
+                                            value={ticket.quantity || ''} 
+                                            onChange={e => handleTicketChange(ticket.id, 'quantity', e.target.value)} 
+                                            className="w-full h-10 px-2 bg-neutral-700 border border-neutral-600 rounded-md text-white focus:outline-none focus:ring-2 focus:ring-purple-500 text-center"
+                                            min="0"
+                                            placeholder="∞"
+                                        />
+                                    </div>
                                     {isFundraiser && (
-                                        <div className="w-1/2 md:w-28">
+                                        <div className="w-1/3 md:w-24">
                                             <label className="md:hidden text-xs font-bold text-neutral-500 uppercase mb-1.5 block">Min Amt</label>
                                             <div className="relative">
                                                 <span className="absolute left-3 top-1/2 -translate-y-1/2 text-neutral-400">$</span>
@@ -434,13 +469,53 @@ const Step4Pricing = ({ data, onChange }: any) => {
 
 // Step 5 Component
 const Step5Image = ({ data, onChange, isGenerating, setGenerating }: any) => {
+    const fileInputRef = useRef<HTMLInputElement>(null);
+    const [uploadProgress, setUploadProgress] = useState(0);
+
+    const handleUploadFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        const file = e.target.files?.[0];
+        if (!file) return;
+
+        setGenerating(true); // Reusing loading state
+        setUploadProgress(10);
+        
+        try {
+            const url = await api.uploadFile(file);
+            onChange('imageUrls', [url]);
+        } catch (error) {
+            console.error("Upload failed", error);
+            alert("Failed to upload image. Please try again.");
+        } finally {
+            setGenerating(false);
+            setUploadProgress(0);
+            if (fileInputRef.current) fileInputRef.current.value = ''; // Reset input
+        }
+    };
 
     const generate = useCallback(async () => {
         if (data.title) {
             setGenerating(true);
-            const imageUrl = await generateEventImage(data.title, data.description || '');
-            onChange('imageUrls', [imageUrl]);
-            setGenerating(false);
+            try {
+                // Generate base64 string from AI
+                const base64Image = await generateEventImage(data.title, data.description || '');
+                
+                // Convert base64 to Blob for upload
+                const res = await fetch(base64Image);
+                const blob = await res.blob();
+                
+                // FIX: Give the blob a name so it isn't saved as '_blob' on server
+                const file = new File([blob], "generated_event_poster.png", { type: "image/png" });
+
+                // Upload to server to get a proper URL
+                const url = await api.uploadFile(file);
+                
+                onChange('imageUrls', [url]);
+            } catch (error) {
+                console.error("AI Generation/Upload failed", error);
+                alert("Failed to generate image.");
+            } finally {
+                setGenerating(false);
+            }
         }
     }, [data.title, data.description, onChange, setGenerating]);
     
@@ -452,25 +527,44 @@ const Step5Image = ({ data, onChange, isGenerating, setGenerating }: any) => {
         }
     }, [generate, data.imageUrls]);
 
-    const handleUpload = () => {
-        const url = window.prompt("Enter a URL for your event image:", "https://picsum.photos/seed/myevent/1024/768");
-        if (url) {
-            onChange('imageUrls', [url]);
-        }
-    };
-
     return (
         <div>
-             <p className="text-neutral-400 text-center mb-4 text-sm">We've generated a poster for you. Tap it to change.</p>
-            <div onClick={handleUpload} className="relative aspect-video w-full bg-neutral-800 rounded-lg overflow-hidden cursor-pointer group border-2 border-dashed border-neutral-700 hover:border-purple-500 transition-colors">
+             <p className="text-neutral-400 text-center mb-4 text-sm">We've generated a poster for you. Tap it to upload your own.</p>
+            <div 
+                onClick={() => fileInputRef.current?.click()} 
+                className="relative aspect-video w-full bg-neutral-800 rounded-lg overflow-hidden cursor-pointer group border-2 border-dashed border-neutral-700 hover:border-purple-500 transition-colors"
+            >
                 {isGenerating ? (
-                    <div className="flex items-center justify-center h-full"><div className="w-8 h-8 border-2 border-white border-t-transparent rounded-full animate-spin"></div><p className="ml-4 text-white">Generating AI Image...</p></div>
+                    <div className="flex items-center justify-center h-full">
+                        <div className="w-8 h-8 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
+                        <p className="ml-4 text-white">
+                            {uploadProgress > 0 ? "Uploading..." : "Generating AI Image..."}
+                        </p>
+                    </div>
                 ) : (
-                    data.imageUrls[0] && <img src={data.imageUrls[0]} alt="Event Preview" className="w-full h-full object-cover"/>
+                    data.imageUrls[0] && (
+                        <img 
+                            src={data.imageUrls[0]} 
+                            alt="Event Preview" 
+                            className="w-full h-full object-cover"
+                            onError={(e) => {
+                                // Provide visual feedback if image fails to load
+                                e.currentTarget.src = "https://placehold.co/600x400/262626/666?text=Image+Load+Error";
+                                console.error("Failed to load image at:", data.imageUrls[0]);
+                            }}
+                        />
+                    )
                 )}
                  <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                    <p className="text-white font-bold">Click to upload custom image</p>
+                    <p className="text-white font-bold flex items-center gap-2"><UploadCloudIcon className="w-5 h-5"/> Upload Custom Image</p>
                 </div>
+                <input 
+                    type="file" 
+                    ref={fileInputRef} 
+                    className="hidden" 
+                    accept="image/*" 
+                    onChange={handleUploadFile} 
+                />
             </div>
             <button onClick={generate} disabled={isGenerating} className="w-full mt-4 px-5 py-3 text-sm font-semibold text-purple-400 hover:text-white transition-colors bg-purple-500/10 hover:bg-purple-500/20 rounded-lg disabled:opacity-50 flex items-center justify-center space-x-2">
                 <WandSparklesIcon className="w-4 h-4"/>

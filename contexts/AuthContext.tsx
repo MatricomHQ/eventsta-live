@@ -6,7 +6,7 @@ import * as api from '../services/api';
 interface AuthContextType {
   user: User | null;
   isAuthenticated: boolean;
-  login: (provider: string, credentials?: string) => Promise<User | null>;
+  login: (provider: string, credentials?: string, userInfo?: { name?: string; email?: string }) => Promise<User | null>;
   logout: () => void;
   isLoading: boolean;
   refreshUser: () => void;
@@ -18,10 +18,10 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
   const [user, setUser] = useState<User | null>(null);
   const [isLoading, setIsLoading] = useState<boolean>(false);
 
-  const login = async (provider: string, credentials?: string): Promise<User | null> => {
+  const login = async (provider: string, credentials?: string, userInfo?: { name?: string; email?: string }): Promise<User | null> => {
     setIsLoading(true);
     try {
-      const userData = await api.signIn(provider, credentials);
+      const userData = await api.signIn(provider, credentials, userInfo);
       setUser(userData);
       return userData;
     } catch (error) {

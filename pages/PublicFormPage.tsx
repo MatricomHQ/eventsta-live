@@ -3,7 +3,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import * as api from '../services/api';
 import { CompetitionForm, Event as EventType } from '../types';
-import { CheckCircleIcon, UploadCloudIcon, ArrowRightIcon } from '../components/Icons';
+import { CheckCircleIcon, UploadCloudIcon, ArrowRightIcon, LockIcon } from '../components/Icons';
 import { useAuth } from '../contexts/AuthContext';
 import SignInModal from '../components/SignInModal';
 
@@ -18,29 +18,71 @@ const PublicFormPage: React.FC = () => {
     const [isLoading, setIsLoading] = useState(true);
     const [error, setError] = useState<string | null>(null);
     const [formData, setFormData] = useState<Record<string, any>>({});
+    const [emailInput, setEmailInput] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [isSuccess, setIsSuccess] = useState(false);
     const [isSignInOpen, setIsSignInOpen] = useState(false);
+
+    // Sync email with authenticated user
+    useEffect(() => {
+        if (user?.email) {
+            setEmailInput(user.email);
+        }
+    }, [user]);
 
     useEffect(() => {
         if (!id) return;
         const fetchFormAndEvent = async () => {
             try {
-                const formData = await api.getPublicForm(id);
-                setForm(formData);
-                
-                // Find the event this form belongs to
-                // CRITICAL: We need the event object to pass to `joinCompetition`.
-                // Let's fetch a few known events.
-                const knownEventIds = ['e1', 'e4', 'e8', 'e9'];
-                const eventsList = await api.getEventsByIds(knownEventIds);
-                const parentEvent = eventsList.find(e => e.competitions?.some(c => c.forms?.some(f => f.id === formData.id)));
-                
+                let foundForm: CompetitionForm | null = null;
+                let parentEvent: EventType | undefined = undefined;
+
+                // 1. Try Direct Lookup
+                try {
+                    const response = await api.getPublicForm(id);
+                    // Explicitly check for null/undefined/empty object which might come from JSON.parse("null")
+                    if (response && Object.keys(response).length > 0) {
+                        foundForm = response;
+                    }
+                } catch (e) {
+                    console.warn("Direct form lookup failed, attempting rescue scan...", e);
+                }
+
+                // 2. Fallback / Parent Search ("Rescue Scan")
+                // If direct lookup failed (backend bug) OR we need the parent event anyway:
+                if (!foundForm || !parentEvent) {
+                    console.log("Scanning events for form:", id);
+                    try {
+                        // Fetch general events feed to scan for the form
+                        const allEvents = await api.getFeaturedEvents(); 
+                        
+                        for (const evt of allEvents) {
+                            const match = evt.forms?.find(f => f.id === id);
+                            if (match) {
+                                // If we didn't have the form yet, use this one
+                                if (!foundForm) foundForm = match;
+                                // We found the parent event
+                                parentEvent = evt;
+                                console.log("Form found via scan in event:", evt.id);
+                                break;
+                            }
+                        }
+                    } catch (scanErr) {
+                        console.error("Form rescue scan failed", scanErr);
+                    }
+                }
+
+                if (!foundForm) {
+                    throw new Error("Form not found. The event may be unpublished or the form ID is incorrect.");
+                }
+
+                setForm(foundForm);
                 if (parentEvent) {
                     setRelatedEvent(parentEvent);
                 }
-            } catch (err) {
-                setError("Form not found or unavailable.");
+            } catch (err: any) {
+                console.error(err);
+                setError(err.message || "Form not found.");
             } finally {
                 setIsLoading(false);
             }
@@ -56,30 +98,32 @@ const PublicFormPage: React.FC = () => {
         e.preventDefault();
         if (!form) return;
         
-        if (!isAuthenticated) {
-            setIsSignInOpen(true);
+        // Ensure email is provided (either auto-populated or manual)
+        if (!emailInput.trim()) {
+            alert("Please enter your email address.");
             return;
         }
-        
-        if (!user) return;
 
         setIsSubmitting(true);
         try {
-            // 1. Submit the form data
-            await api.submitFormResponse(form.id, formData);
+            // 1. Submit the form data with email and linked competition ID
+            const submissionPayload = {
+                ...formData,
+                email: emailInput,
+                linked_competition_id: form.linkedCompetitionId // Help backend automate linkage
+            };
             
-            // 2. Join competition if event found
-            if (relatedEvent) {
-                await api.joinCompetition(user.id, relatedEvent);
-            } else {
-                // Try finding it dynamically if not found in init
-                // This is a fallback for the mock data structure
-                const events = await api.getFeaturedEvents();
-                // Basic fallback logic for demo
-                if (events.length > 0) {
-                     await api.joinCompetition(user.id, events[0]);
+            await api.submitFormResponse(form.id, submissionPayload);
+            
+            // 2. Join competition explicitly if authenticated (immediate UI update safe-guard)
+            // Guests cannot "join" a competition in the context of the leaderboard without an account
+            if (relatedEvent && user) {
+                if (form.linkedCompetitionId) {
+                    await api.joinCompetition(user.id, relatedEvent, form.linkedCompetitionId);
+                } else {
+                    await api.joinCompetition(user.id, relatedEvent);
                 }
-            }
+            } 
 
             setIsSuccess(true);
         } catch (err) {
@@ -90,15 +134,8 @@ const PublicFormPage: React.FC = () => {
         }
     };
 
-    // Effect to auto-submit if user just logged in and form data exists
-    useEffect(() => {
-        if (isAuthenticated && user && Object.keys(formData).length > 0 && !isSubmitting && !isSuccess && !isSignInOpen) {
-            // Optional: Logic to resume submission
-        }
-    }, [isAuthenticated, user, formData, isSubmitting, isSuccess, isSignInOpen]);
-
     if (isLoading) return <div className="min-h-screen flex items-center justify-center bg-black text-neutral-500">Loading form...</div>;
-    if (error || !form) return <div className="min-h-screen flex items-center justify-center bg-black text-red-400">{error || 'Form not found'}</div>;
+    if (error || !form) return <div className="min-h-screen flex items-center justify-center bg-black text-red-400 p-4 text-center">{error || 'Form not found'}</div>;
 
     if (isSuccess) {
         return (
@@ -168,6 +205,32 @@ const PublicFormPage: React.FC = () => {
                         </div>
 
                         <form onSubmit={handleSubmit} className="space-y-8">
+                            {/* Standard Email Field */}
+                            <div className="space-y-3">
+                                <label className="block text-lg font-medium text-white flex justify-between items-center">
+                                    <span>Email Address <span className="text-purple-500">*</span></span>
+                                    {isAuthenticated && (
+                                        <span className="text-xs font-normal text-green-400 bg-green-500/10 border border-green-500/20 rounded-full px-2 py-0.5 flex items-center gap-1">
+                                            <LockIcon className="w-3 h-3"/> Authenticated
+                                        </span>
+                                    )}
+                                </label>
+                                <input 
+                                    type="email" 
+                                    required
+                                    placeholder="name@example.com"
+                                    value={emailInput}
+                                    onChange={e => setEmailInput(e.target.value)}
+                                    readOnly={isAuthenticated}
+                                    className={`w-full bg-black/20 border border-neutral-700 rounded-xl px-5 py-4 text-white placeholder-neutral-500 focus:outline-none focus:ring-2 focus:ring-purple-500/50 focus:border-purple-500 transition-all ${isAuthenticated ? 'opacity-70 cursor-not-allowed bg-neutral-800/50' : ''}`}
+                                />
+                                {!isAuthenticated && (
+                                    <p className="text-sm text-neutral-500">
+                                        <button type="button" onClick={() => setIsSignInOpen(true)} className="text-purple-400 hover:text-white underline">Sign in</button> to link this to your account.
+                                    </p>
+                                )}
+                            </div>
+
                             {form.elements.map(element => (
                                 <div key={element.id} className="space-y-3">
                                     <label className="block text-lg font-medium text-white">

@@ -17,13 +17,21 @@ export const createEventSlug = (title: string, id: string): string => {
 
 /**
  * Extracts the ID from a slug string.
- * Assumes the ID is the last segment separated by a hyphen.
- * Example: "tidalrave-long-beach-e1" -> "e1"
+ * Supports standard UUIDs (which contain hyphens).
+ * Example UUID: "tidalrave-369fc337-7496-48f5-8fa4-7f122b17ebad" -> "369fc337-7496-48f5-8fa4-7f122b17ebad"
  */
 export const extractEventId = (slugParam: string | undefined): string => {
     if (!slugParam) return '';
     
-    // Split by hyphen and take the last part
+    // Check for UUID at the end of the string (8-4-4-4-12 hex chars)
+    const uuidRegex = /[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/;
+    const match = slugParam.match(uuidRegex);
+    
+    if (match) {
+        return match[0];
+    }
+    
+    // Strict fallback: Split by hyphen and take the last part, assuming backend always provides ID at end.
     const parts = slugParam.split('-');
     return parts[parts.length - 1];
 };

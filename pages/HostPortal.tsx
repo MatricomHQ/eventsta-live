@@ -11,6 +11,8 @@
 
 
 
+
+
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
@@ -118,18 +120,19 @@ const HostingContent: React.FC<{ user: any, onAddEventClick: (host: Host) => voi
                 setEvents([]);
                 return;
             };
-            const selectedHost = hosts.find(h => h.id === selectedHostId);
-            if (selectedHost && selectedHost.eventIds.length > 0) {
-                const fetchedEvents = await api.getEventsByIds(selectedHost.eventIds);
+            // Fetch directly by host_id, ignoring the potentially stale eventIds array in the host object
+            try {
+                const fetchedEvents = await api.getEventsByHost(selectedHostId);
                 setEvents(fetchedEvents.sort((a,b) => new Date(b.date).getTime() - new Date(a.date).getTime()));
-            } else {
+            } catch (e) {
+                console.error("Failed to fetch events for host", e);
                 setEvents([]);
             }
         };
-        if (hosts.length > 0) {
+        if (selectedHostId) {
             fetchEvents();
         }
-    }, [selectedHostId, hosts]);
+    }, [selectedHostId]);
 
     const selectedHost = hosts.find(h => h.id === selectedHostId);
 

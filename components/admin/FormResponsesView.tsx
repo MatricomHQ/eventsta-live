@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import { CompetitionForm } from '../../types';
 import * as api from '../../services/api';
@@ -31,12 +32,13 @@ const FormResponsesView: React.FC<FormResponsesViewProps> = ({ form, onBack }) =
         if (responses.length === 0) return;
 
         // Define headers
-        const headers = ['Submission Date', ...form.elements.map(el => el.label)];
+        const headers = ['Submission Date', 'Email', ...form.elements.map(el => el.label)];
         
         // Create rows
         const rows = responses.map(response => {
             const rowData = [
                 new Date(response.submissionDate).toLocaleString(),
+                `"${response.email || ''}"`,
                 ...form.elements.map(el => {
                     const val = response[el.id];
                     if (Array.isArray(val)) return `"${val.join(', ')}"`; // CSV escape for arrays (checkboxes)
@@ -88,6 +90,7 @@ const FormResponsesView: React.FC<FormResponsesViewProps> = ({ form, onBack }) =
                             <thead className="text-xs text-neutral-400 uppercase bg-neutral-950 border-b border-neutral-800 sticky top-0 z-10">
                                 <tr>
                                     <th className="px-6 py-3 font-bold min-w-[180px]">Submission Date</th>
+                                    <th className="px-6 py-3 font-bold min-w-[250px]">Email</th>
                                     {form.elements.map(el => (
                                         <th key={el.id} className="px-6 py-3 font-bold min-w-[200px]">
                                             {el.label}
@@ -100,6 +103,9 @@ const FormResponsesView: React.FC<FormResponsesViewProps> = ({ form, onBack }) =
                                     <tr key={idx} className="hover:bg-neutral-800/50">
                                         <td className="px-6 py-4 font-mono text-xs text-neutral-500">
                                             {new Date(response.submissionDate).toLocaleString()}
+                                        </td>
+                                        <td className="px-6 py-4 text-white">
+                                            {response.email || '-'}
                                         </td>
                                         {form.elements.map(el => {
                                             const value = response[el.id];

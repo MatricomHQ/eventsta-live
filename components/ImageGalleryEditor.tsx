@@ -1,10 +1,12 @@
+
 import React, { useState, useRef } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { PlusIcon, TrashIcon, GripVerticalIcon } from './Icons';
+import * as api from '../services/api';
 
 interface ImageItem {
   id: string;
-  url: string; // base64 data URL
+  url: string; // Remote URL
 }
 
 interface UploadingFile {
@@ -17,16 +19,6 @@ interface ImageGalleryEditorProps {
   images: string[];
   onImagesChange: (newImages: string[]) => void;
 }
-
-// Utility to read file as data URL
-const readFileAsDataURL = (file: File): Promise<string> => {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(reader.result as string);
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-};
 
 const ImageGalleryEditor: React.FC<ImageGalleryEditorProps> = ({ images, onImagesChange }) => {
   const [galleryImages, setGalleryImages] = useState<ImageItem[]>(() =>
@@ -41,11 +33,11 @@ const ImageGalleryEditor: React.FC<ImageGalleryEditorProps> = ({ images, onImage
     const files: File[] = Array.from(event.target.files || []);
     if (!files.length) return;
 
-    // Let TypeScript infer the file type from the `files` array.
+    // Create placeholders for progress
     const newUploads: UploadingFile[] = files.map(file => ({
         id: uuidv4(),
         name: file.name,
-        progress: 0,
+        progress: 10,
     }));
     setUploadingFiles(prev => [...prev, ...newUploads]);
 
@@ -53,24 +45,24 @@ const ImageGalleryEditor: React.FC<ImageGalleryEditorProps> = ({ images, onImage
         const file = files[i];
         const uploadId = newUploads[i].id;
         
-        // Simulate upload progress
-        const interval = setInterval(() => {
-            setUploadingFiles(prev => prev.map(f => f.id === uploadId ? {...f, progress: f.progress + 10 } : f));
-        }, 100);
-
         try {
-            const dataUrl = await readFileAsDataURL(file);
-            const newImage = { id: uuidv4(), url: dataUrl };
-
-            // Update parent state
-            onImagesChange([...images, dataUrl]);
+            // Upload to server
+            const uploadedUrl = await api.uploadFile(file);
+            
+            const newImage = { id: uuidv4(), url: uploadedUrl };
 
             // Update internal state
-            setGalleryImages(prev => [...prev, newImage]);
+            setGalleryImages(prev => {
+                const updated = [...prev, newImage];
+                // Update parent state with all URLs
+                onImagesChange(updated.map(img => img.url));
+                return updated;
+            });
+
         } catch (error) {
-            console.error("Error reading file:", error);
+            console.error("Error uploading file:", error);
+            alert(`Failed to upload ${file.name}`);
         } finally {
-            clearInterval(interval);
             // Remove from uploading list
             setUploadingFiles(prev => prev.filter(f => f.id !== uploadId));
         }
@@ -151,10 +143,10 @@ const ImageGalleryEditor: React.FC<ImageGalleryEditorProps> = ({ images, onImage
               {uploadingFiles.map(file => (
                   <div key={file.id} className="text-white">
                       <p className="text-xs text-neutral-400 truncate mb-1">{file.name}</p>
-                      <div className="w-full bg-neutral-700 rounded-full h-2">
+                      <div className="w-full bg-neutral-700 rounded-full h-2 overflow-hidden">
                            <div 
-                                className="bg-purple-600 h-2 rounded-full transition-all duration-150" 
-                                style={{ width: `${file.progress}%` }}
+                                className="bg-purple-600 h-full rounded-full animate-pulse" 
+                                style={{ width: '100%' }}
                            ></div>
                       </div>
                   </div>

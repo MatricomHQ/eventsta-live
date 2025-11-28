@@ -1,5 +1,5 @@
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
@@ -17,8 +17,37 @@ const FormsTab: React.FC<{ event: EventType, onEventUpdate: () => void }> = ({ e
     const [copiedFormId, setCopiedFormId] = useState<string | null>(null);
     const [isSettingsModalOpen, setIsSettingsModalOpen] = useState(false);
     const [settingsForm, setSettingsForm] = useState<CompetitionForm | null>(null);
+    
+    // State to hold verified counts fetched directly from the responses endpoint
+    const [realtimeCounts, setRealtimeCounts] = useState<Record<string, number>>({});
 
     const forms = event.forms || [];
+
+    // Fetch verified counts on mount or when forms change
+    useEffect(() => {
+        let isMounted = true;
+        const fetchCounts = async () => {
+            if (forms.length === 0) return;
+            
+            await Promise.all(forms.map(async (form) => {
+                try {
+                    // Fetch actual responses to get accurate count
+                    const responses = await api.getFormResponses(form.id);
+                    if (isMounted) {
+                        setRealtimeCounts(prev => ({
+                            ...prev,
+                            [form.id]: responses.length
+                        }));
+                    }
+                } catch (e) {
+                    console.warn(`Failed to fetch count for form ${form.id}`, e);
+                }
+            }));
+        };
+
+        fetchCounts();
+        return () => { isMounted = false; };
+    }, [forms]);
 
     const handleSaveForm = async (form: CompetitionForm) => {
         if (!user) return;
@@ -153,7 +182,8 @@ const FormsTab: React.FC<{ event: EventType, onEventUpdate: () => void }> = ({ e
                                 <div className="mt-auto pt-3 border-t border-neutral-800 flex justify-between items-center">
                                     <button onClick={() => handleViewResponses(form.id)} className="flex items-center gap-1.5 text-sm text-neutral-300 hover:text-white transition-colors">
                                         <BarChartIcon className="w-4 h-4 text-neutral-500" />
-                                        <span>{form.responsesCount} Responses</span>
+                                        {/* Use realtime count if available, otherwise fallback to stored count */}
+                                        <span>{realtimeCounts[form.id] !== undefined ? realtimeCounts[form.id] : form.responsesCount} Responses</span>
                                     </button>
                                 </div>
                             </div>
@@ -167,7 +197,6 @@ const FormsTab: React.FC<{ event: EventType, onEventUpdate: () => void }> = ({ e
                                 </button>
                                 <Link 
                                     to={`/form/${form.id}`} 
-                                    target="_blank" 
                                     className="flex items-center justify-center gap-2 py-2 text-xs font-medium text-neutral-400 hover:text-white hover:bg-neutral-800 rounded transition-colors"
                                 >
                                     <EyeIcon className="w-3.5 h-3.5" />

@@ -22,6 +22,7 @@ export interface Host {
 }
 
 export interface TicketOption {
+  id?: string; // Backend inventory ID
   type: string;
   price: number; // For ticketed events: fixed price. For fundraisers: recommended donation.
   minimumDonation?: number; // For fundraiser events: minimum donation required.
@@ -153,6 +154,7 @@ export interface PurchasedTicket {
   eventId: string;
   eventName: string;
   ticketType: string;
+  inventoryId?: string; // Helper to link back to the TicketOption
   qty: number;
   purchaseDate: string;
 }

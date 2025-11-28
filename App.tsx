@@ -16,7 +16,6 @@ import PublicFormPage from './pages/PublicFormPage';
 import { useGoogleOneTapLogin } from '@react-oauth/google';
 import { jwtDecode } from "jwt-decode";
 import * as api from './services/api';
-import RoleSelectionModal from './components/RoleSelectionModal';
 import { ShieldIcon } from './components/Icons';
 
 // Lazy load System Admin to isolate code
@@ -26,9 +25,7 @@ const SystemAdmin = React.lazy(() => import('./pages/SystemAdmin'));
 const AppContent: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate(); // Use hook inside component within Router context
-  const { login, user } = useAuth();
-  const [showRoleSelectionModal, setShowRoleSelectionModal] = useState(false);
-  const [pendingGoogleUser, setPendingGoogleUser] = useState<{ email: string; name: string; token: string } | null>(null);
+  const { login, user, refreshUser } = useAuth();
   
   // Maintenance Mode State
   const [isMaintenanceMode, setIsMaintenanceMode] = useState(false);
@@ -40,8 +37,10 @@ const AppContent: React.FC = () => {
               setIsMaintenanceMode(settings.maintenanceMode);
           })
           .catch(err => {
-              // Log strictly to console but do not break the UI
-              console.warn("Failed to fetch system settings (likely unauthorized or offline):", err.message);
+              // Only log if it's not a 403 (Forbidden) which is currently expected for non-admins
+              if (!err.message.includes('403') && !err.message.includes('Forbidden')) {
+                  console.warn("Failed to fetch system settings:", err.message);
+              }
               setIsMaintenanceMode(false);
           });
   }, []);
@@ -60,8 +59,29 @@ const AppContent: React.FC = () => {
                 const name = decoded.name || email.split('@')[0];
                 
                 try {
-                    // Try to login directly
-                    await login('google-one-tap', token);
+                    // Try to login directly, passing decoded info to help backend
+                    const loggedInUser = await login('google-one-tap', token, { name, email });
+                    
+                    // FIX: Ensure actual user info is saved if backend used placeholders
+                    if (loggedInUser) {
+                        const isPlaceholder = 
+                            loggedInUser.name === 'Google User' || 
+                            loggedInUser.email.includes('placeholder') ||
+                            loggedInUser.email.includes('fake');
+                        
+                        // Also update if details don't match Google data (and we trust Google data more for login)
+                        const mismatch = loggedInUser.email !== email || (loggedInUser.name !== name && name);
+
+                        if (isPlaceholder || mismatch) {
+                            try {
+                                console.log("Updating user profile with Google data...");
+                                await api.updateUser(loggedInUser.id, { name, email });
+                                await refreshUser();
+                            } catch (updateErr) {
+                                console.warn("Failed to auto-update user details after Google login", updateErr);
+                            }
+                        }
+                    }
                     
                     // Check for pending checkout
                     const pendingEventId = sessionStorage.getItem('pendingCheckoutEventId');
@@ -69,18 +89,20 @@ const AppContent: React.FC = () => {
                         navigate(`/event/${pendingEventId}`);
                     }
                 } catch (e) {
-                    // Login failed, assume user needs registration or selection
-                    if (isPublicForm) {
-                        try {
-                            await api.registerUser(email, name, 'attendee');
-                            await login('google-one-tap', token);
-                        } catch (regError) {
-                            console.error("Registration failed", regError);
+                    // Login failed, assumes user needs registration.
+                    // Automatically register with default 'attendee' role (api.registerUser also auto-creates host profile)
+                    try {
+                        await api.registerUser(email, name, 'attendee');
+                        // Login again with explicit info
+                        await login('google-one-tap', token, { name, email });
+                        
+                        // Check for pending checkout
+                        const pendingEventId = sessionStorage.getItem('pendingCheckoutEventId');
+                        if (pendingEventId) {
+                            navigate(`/event/${pendingEventId}`);
                         }
-                    } else {
-                        // Store token for registration
-                        setPendingGoogleUser({ email, name, token });
-                        setShowRoleSelectionModal(true);
+                    } catch (regError) {
+                        console.error("Auto-registration failed", regError);
                     }
                 }
             }
@@ -91,31 +113,6 @@ const AppContent: React.FC = () => {
     },
     disabled: !!user, // Do not show if user is already logged in
   });
-  
-  const handleRoleSelect = async (role: 'attendee' | 'host') => {
-      if (pendingGoogleUser) {
-          try {
-              // Register the new user with the selected role
-              await api.registerUser(pendingGoogleUser.email, pendingGoogleUser.name, role);
-              // Log them in using the stored token
-              await login('google-one-tap', pendingGoogleUser.token);
-              
-              // Cleanup
-              setPendingGoogleUser(null);
-              setShowRoleSelectionModal(false);
-              
-              // Check for pending checkout logic here as well if new user wants to buy immediately
-              const pendingEventId = sessionStorage.getItem('pendingCheckoutEventId');
-              if (pendingEventId) {
-                  navigate(`/event/${pendingEventId}`);
-              }
-          } catch (e) {
-              alert("Registration failed. Please try again later.");
-              setPendingGoogleUser(null);
-              setShowRoleSelectionModal(false);
-          }
-      }
-  };
   
   // Determine if the current page renders its own background (like a blurred hero image).
   // We exclude the event admin pages (containing '/admin/') so they use the standard dark background.
@@ -170,13 +167,6 @@ const AppContent: React.FC = () => {
           />
         </Routes>
       </main>
-      
-      <RoleSelectionModal 
-        isOpen={showRoleSelectionModal} 
-        onClose={() => setShowRoleSelectionModal(false)}
-        onSelectRole={handleRoleSelect}
-        userName={pendingGoogleUser?.name || 'Guest'}
-      />
     </div>
   );
 };

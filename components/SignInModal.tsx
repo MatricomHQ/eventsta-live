@@ -7,7 +7,6 @@ import { ShieldIcon, GoogleIcon, ArrowLeftIcon, MailIcon, XIcon, PlayCircleIcon 
 import { User } from '../types';
 import * as api from '../services/api';
 import { useGoogleLogin } from '@react-oauth/google';
-import RoleSelectionModal from './RoleSelectionModal';
 
 
 interface SignInModalProps {
@@ -57,16 +56,12 @@ const determineRedirectPath = async (user: User): Promise<string> => {
 
 
 const SignInModal: React.FC<SignInModalProps> = ({ isOpen, onClose, context = 'default' }) => {
-  const { login, isLoading } = useAuth();
+  const { login, isLoading, refreshUser } = useAuth();
   const navigate = useNavigate();
   
   // Flow State
   const [view, setView] = useState<'main' | 'email' | 'name_input' | 'forgot_password'>('main');
-  const [pendingGoogleUser, setPendingGoogleUser] = useState<{ email: string; name: string; token: string } | null>(null);
-  // Store pending registration data from email flow
-  const [pendingRegUser, setPendingRegUser] = useState<{ email: string; name: string; password?: string } | null>(null);
-  const [showRoleSelection, setShowRoleSelection] = useState(false);
-
+  
   // Form State
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -85,9 +80,6 @@ const SignInModal: React.FC<SignInModalProps> = ({ isOpen, onClose, context = 'd
           setPassword('');
           setName('');
           setError('');
-          setPendingGoogleUser(null);
-          setPendingRegUser(null);
-          setShowRoleSelection(false);
           setForgotPasswordSuccess(false);
           setIsCheckingUser(false);
       }
@@ -95,10 +87,28 @@ const SignInModal: React.FC<SignInModalProps> = ({ isOpen, onClose, context = 'd
 
   const handleGoogleLogin = async (token: string, email: string, name: string) => {
       try {
-          // Attempt to login with Google token directly
-          const user = await login('google-one-tap', token);
+          // Attempt to login with Google token directly, passing extra info
+          const user = await login('google-one-tap', token, { name, email });
           
           if (user) {
+              // FIX: Ensure actual user info is saved if backend used placeholders
+              const isPlaceholder = 
+                  user.name === 'Google User' || 
+                  user.email.includes('placeholder') ||
+                  user.email.includes('fake');
+              
+              const mismatch = user.email !== email || (user.name !== name && name);
+
+              if (isPlaceholder || mismatch) {
+                  try {
+                      console.log("Updating user profile with Google data...");
+                      await api.updateUser(user.id, { name, email });
+                      await refreshUser();
+                  } catch (updateErr) {
+                      console.warn("Failed to auto-update user details after Google login", updateErr);
+                  }
+              }
+
               onClose();
               if (context === 'default') {
                   const destination = await determineRedirectPath(user);
@@ -107,22 +117,21 @@ const SignInModal: React.FC<SignInModalProps> = ({ isOpen, onClose, context = 'd
           }
       } catch (error) {
           // If login fails (throws), it implies user might not exist or token invalid.
-          // For Google Sign In flows, we assume it's a new user needing registration.
-          console.warn("Google login failed, attempting registration flow:", error);
+          // We assume it's a new user needing registration.
+          console.warn("Google login failed, attempting auto-registration:", error);
           
-          if (isApplication) {
-              // SPECIAL FLOW: Auto-register for applications
-              try {
-                  await api.registerUser(email, name, 'attendee');
-                  await login('google-one-tap', token);
-                  onClose();
-              } catch (regError: any) {
-                  setError(regError.message || "Registration failed.");
+          try {
+              // Automatically register as 'attendee' (creates host profile anyway)
+              await api.registerUser(email, name, 'attendee');
+              const user = await login('google-one-tap', token, { name, email });
+              
+              onClose();
+              if (user && context === 'default') {
+                  const destination = await determineRedirectPath(user);
+                  navigate(destination);
               }
-          } else {
-              // Trigger role selection flow for new users
-              setPendingGoogleUser({ email, name, token });
-              setShowRoleSelection(true);
+          } catch (regError: any) {
+              setError(regError.message || "Registration failed.");
           }
       }
   };
@@ -205,70 +214,19 @@ const SignInModal: React.FC<SignInModalProps> = ({ isOpen, onClose, context = 'd
           return;
       }
       
-      if (isApplication) {
-          try {
-              // Auto-register for applications
-              await api.registerUser(email, name, 'attendee', password);
-              await login('email', `${email}|${password}`);
-              onClose();
-          } catch (regError: any) {
-              setError(regError.message || "Registration failed.");
-          }
-      } else {
-          // Use dedicated state for email flow pending user
-          setPendingRegUser({ email, name, password });
-          setShowRoleSelection(true);
-      }
-  };
-
-  const handleRoleSelect = async (role: 'attendee' | 'host') => {
       try {
-          // Handle Google Flow
-          if (pendingGoogleUser) {
-              await api.registerUser(pendingGoogleUser.email, pendingGoogleUser.name, role);
-              const user = await login('google-one-tap', pendingGoogleUser.token);
-              
-              setPendingGoogleUser(null);
-              setShowRoleSelection(false);
-              onClose();
-              
-              if (user) {
-                  // Explicitly check role intent for navigation
-                  if (role === 'host') {
-                      navigate('/events');
-                  } else {
-                      const destination = await determineRedirectPath(user);
-                      navigate(destination);
-                  }
-              }
-              return;
+          // Auto-register with default 'attendee' role
+          await api.registerUser(email, name, 'attendee', password);
+          // Ensure we pass credentials to login so api.signIn sends the correct password
+          const user = await login('email', `${email}|${password}`);
+          
+          onClose();
+          if (user && context === 'default') {
+              const destination = await determineRedirectPath(user);
+              navigate(destination);
           }
-
-          // Handle Email/Password Flow
-          if (pendingRegUser) {
-              await api.registerUser(pendingRegUser.email, pendingRegUser.name, role, pendingRegUser.password);
-              // Ensure we pass credentials to login so api.signIn sends the correct password
-              const user = await login('email', `${pendingRegUser.email}|${pendingRegUser.password}`);
-              
-              setPendingRegUser(null);
-              setShowRoleSelection(false);
-              onClose();
-              
-              if (user) {
-                  // Explicitly check role intent for navigation
-                  if (role === 'host') {
-                      navigate('/events');
-                  } else {
-                      const destination = await determineRedirectPath(user);
-                      navigate(destination);
-                  }
-              }
-          }
-      } catch (err: any) {
-          setShowRoleSelection(false);
-          setError(err.message || "Registration failed.");
-          if (pendingGoogleUser) setPendingGoogleUser(null);
-          setView('main');
+      } catch (regError: any) {
+          setError(regError.message || "Registration failed.");
       }
   };
 
@@ -309,17 +267,6 @@ const SignInModal: React.FC<SignInModalProps> = ({ isOpen, onClose, context = 'd
       } catch (error) {
           setError("Demo login failed.");
       }
-  }
-
-  if (showRoleSelection && (pendingGoogleUser || pendingRegUser)) {
-      return (
-          <RoleSelectionModal 
-            isOpen={true} 
-            onClose={() => { setShowRoleSelection(false); onClose(); }} 
-            onSelectRole={handleRoleSelect} 
-            userName={pendingGoogleUser?.name || pendingRegUser?.name || 'Guest'}
-          />
-      );
   }
 
   return (

@@ -103,36 +103,59 @@ const PromoCodesTab: React.FC<{ event: EventType }> = ({ event }) => {
                 onClose={() => setIsModalOpen(false)}
                 onCreated={handleCodeCreated}
                 eventId={event.id}
+                existingCodes={codes}
             />
         </div>
     );
 };
 
-const CreatePromoCodeModal: React.FC<{ isOpen: boolean, onClose: () => void, onCreated: (code: PromoCode) => void, eventId: string }> = ({ isOpen, onClose, onCreated, eventId }) => {
+const CreatePromoCodeModal: React.FC<{ isOpen: boolean, onClose: () => void, onCreated: (code: PromoCode) => void, eventId: string, existingCodes: PromoCode[] }> = ({ isOpen, onClose, onCreated, eventId, existingCodes }) => {
     const { user } = useAuth();
     const [code, setCode] = useState('');
     const [discount, setDiscount] = useState(10);
     const [maxUses, setMaxUses] = useState<number | ''>('');
     const [isLoading, setIsLoading] = useState(false);
+    const [error, setError] = useState('');
+
+    useEffect(() => {
+        if (isOpen) {
+            setCode('');
+            setDiscount(10);
+            setMaxUses('');
+            setError('');
+        }
+    }, [isOpen]);
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
+        setError('');
         if (!user || !code.trim()) return;
+
+        const normalizedCode = code.trim().toUpperCase();
+
+        // CHECK 1: Client-side duplication check
+        if (existingCodes.some(c => c.code === normalizedCode)) {
+            setError('Promo code already exists. Please use a unique name.');
+            return;
+        }
 
         setIsLoading(true);
         const newCodeData = {
-            code: code.trim().toUpperCase(),
+            code: normalizedCode,
             discountPercent: discount,
             maxUses: maxUses === '' ? null : Number(maxUses)
         };
         try {
             const createdCode = await api.createPromoCode(user.id, eventId, newCodeData);
             onCreated(createdCode);
-            setCode('');
-            setDiscount(10);
-            setMaxUses('');
-        } catch (error) {
+        } catch (error: any) {
             console.error(error);
+            // Handle backend duplication error if it slips through client check
+            if (error.message && error.message.toLowerCase().includes('exists')) {
+                setError('Promo code already exists.');
+            } else {
+                setError(error.message || "Failed to create code.");
+            }
         } finally {
             setIsLoading(false);
         }
@@ -146,7 +169,17 @@ const CreatePromoCodeModal: React.FC<{ isOpen: boolean, onClose: () => void, onC
                     <div className="space-y-4">
                         <div>
                             <label className="block text-sm font-medium text-neutral-300 mb-2">Code</label>
-                            <input type="text" value={code} onChange={e => setCode(e.target.value)} placeholder="e.g., EARLYBIRD20" className="w-full h-12 px-4 bg-neutral-800 border border-neutral-700 rounded-lg text-white font-mono uppercase" required />
+                            <input 
+                                type="text" 
+                                value={code} 
+                                onChange={e => {
+                                    setCode(e.target.value);
+                                    setError('');
+                                }} 
+                                placeholder="e.g., EARLYBIRD20" 
+                                className="w-full h-12 px-4 bg-neutral-800 border border-neutral-700 rounded-lg text-white font-mono uppercase" 
+                                required 
+                            />
                         </div>
                          <div>
                             <label className="block text-sm font-medium text-neutral-300 mb-2">Discount (%)</label>
@@ -156,10 +189,11 @@ const CreatePromoCodeModal: React.FC<{ isOpen: boolean, onClose: () => void, onC
                             <label className="block text-sm font-medium text-neutral-300 mb-2">Max Uses (optional)</label>
                             <input type="number" value={maxUses} onChange={e => setMaxUses(e.target.value === '' ? '' : Number(e.target.value))} min="1" placeholder="Leave blank for unlimited" className="w-full h-12 px-4 bg-neutral-800 border border-neutral-700 rounded-lg text-white" />
                         </div>
+                        {error && <p className="text-red-400 text-sm mt-2 p-2 bg-red-500/10 rounded border border-red-500/20">{error}</p>}
                     </div>
                 </div>
                 <div className="p-4 bg-neutral-900/50 border-t border-neutral-800 flex justify-end">
-                    <button type="submit" disabled={isLoading} className="px-5 py-2 text-sm font-semibold rounded-full bg-purple-600 text-white hover:bg-purple-500 disabled:opacity-50">
+                    <button type="submit" disabled={isLoading} className="px-5 py-2 text-sm font-semibold rounded-full bg-purple-600 text-white hover:bg-purple-500 disabled:opacity-50 transition-colors">
                         {isLoading ? 'Creating...' : 'Create Code'}
                     </button>
                 </div>

@@ -3,6 +3,7 @@ import React, { useState, useRef, useEffect } from 'react';
 import { Link } from 'react-router-dom';
 import { v4 as uuidv4 } from 'uuid';
 import { CompetitionForm, FormElement, FormElementType } from '../types';
+import * as api from '../services/api';
 import { 
     TypeIcon, ListIcon, ImagePlusIcon, EyeIcon, 
     GripHorizontalIcon, TrashIcon, CheckCircleIcon, PlusIcon,
@@ -20,6 +21,7 @@ const FormBuilder: React.FC<FormBuilderProps> = ({ form: initialForm, onSave, on
     const [activeElementId, setActiveElementId] = useState<string | null>(null);
     const [headerImagePreview, setHeaderImagePreview] = useState<string | null>(initialForm.headerImageUrl || null);
     const [isSaving, setIsSaving] = useState(false);
+    const [isHeaderUploading, setIsHeaderUploading] = useState(false);
     const headerInputRef = useRef<HTMLInputElement>(null);
     const [copySuccess, setCopySuccess] = useState(false);
 
@@ -31,16 +33,30 @@ const FormBuilder: React.FC<FormBuilderProps> = ({ form: initialForm, onSave, on
     const dragItem = useRef<number | null>(null);
     const dragOverItem = useRef<number | null>(null);
 
-    const handleHeaderUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const handleHeaderUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
-        if (file) {
-            const reader = new FileReader();
-            reader.onload = (event) => {
-                const url = event.target?.result as string;
-                setHeaderImagePreview(url);
-                setForm(prev => ({ ...prev, headerImageUrl: url }));
-            };
-            reader.readAsDataURL(file);
+        if (!file) return;
+
+        // 1. Instant Preview with Object URL
+        const objectUrl = URL.createObjectURL(file);
+        setHeaderImagePreview(objectUrl);
+        setIsHeaderUploading(true);
+
+        try {
+            // 2. Upload in background
+            const uploadedUrl = await api.uploadFile(file);
+            
+            // 3. Update form state with remote URL
+            setForm(prev => ({ ...prev, headerImageUrl: uploadedUrl }));
+        } catch (error) {
+            console.error("Header image upload failed", error);
+            alert("Failed to upload image. Please try again.");
+        } finally {
+            setIsHeaderUploading(false);
+            // Reset input so same file can be selected again if needed
+            if (headerInputRef.current) {
+                headerInputRef.current.value = '';
+            }
         }
     };
 
@@ -100,10 +116,14 @@ const FormBuilder: React.FC<FormBuilderProps> = ({ form: initialForm, onSave, on
     };
 
     const handleSave = async () => {
+        if (isHeaderUploading) {
+            alert("Please wait for image upload to complete.");
+            return;
+        }
+
         setIsSaving(true);
         
         // Capture content from refs safely using optional chaining.
-        // This prevents errors if refs are null (e.g. component unmounted or not attached).
         const currentTitle = titleRef.current?.innerText ?? form.title;
         const currentDesc = descRef.current?.innerHTML ?? form.description;
         
@@ -162,10 +182,10 @@ const FormBuilder: React.FC<FormBuilderProps> = ({ form: initialForm, onSave, on
                     </div>
                     <button 
                         onClick={handleSave} 
-                        disabled={isSaving}
+                        disabled={isSaving || isHeaderUploading}
                         className="bg-white hover:bg-neutral-200 text-black px-6 py-2 rounded-full text-sm font-bold transition-colors flex items-center gap-2 disabled:opacity-50 shadow-[0_0_15px_rgba(255,255,255,0.2)]"
                     >
-                        {isSaving ? 'Saving...' : 'Save & Close'}
+                        {isSaving ? 'Saving...' : isHeaderUploading ? 'Uploading...' : 'Save & Close'}
                     </button>
                 </div>
             </div>
@@ -205,9 +225,23 @@ const FormBuilder: React.FC<FormBuilderProps> = ({ form: initialForm, onSave, on
                                             <span className="text-sm font-medium">Add Cover Image</span>
                                         </div>
                                     )}
-                                    <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
-                                        <span className="text-white font-medium flex items-center gap-2 px-4 py-2 bg-black/50 rounded-full backdrop-blur-md border border-white/10"><UploadCloudIcon className="w-5 h-5"/> Change Cover</span>
-                                    </div>
+                                    
+                                    {/* Uploading Overlay */}
+                                    {isHeaderUploading && (
+                                        <div className="absolute inset-0 bg-black/60 flex flex-col items-center justify-center z-20">
+                                            <div className="w-10 h-10 border-4 border-white border-t-transparent rounded-full animate-spin mb-2"></div>
+                                            <span className="text-white text-xs font-bold uppercase tracking-wider">Uploading...</span>
+                                        </div>
+                                    )}
+
+                                    {/* Hover Overlay (only when not uploading) */}
+                                    {!isHeaderUploading && (
+                                        <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center z-10">
+                                            <span className="text-white font-medium flex items-center gap-2 px-4 py-2 bg-black/50 rounded-full backdrop-blur-md border border-white/10">
+                                                <UploadCloudIcon className="w-5 h-5"/> Change Cover
+                                            </span>
+                                        </div>
+                                    )}
                                     <input type="file" ref={headerInputRef} className="hidden" accept="image/*" onChange={handleHeaderUpload} />
                                 </div>
 
@@ -219,7 +253,6 @@ const FormBuilder: React.FC<FormBuilderProps> = ({ form: initialForm, onSave, on
                                             contentEditable
                                             suppressContentEditableWarning
                                             onBlur={(e) => {
-                                                // Extract text before setting state to avoid synthetic event nullification in async updater
                                                 const newTitle = e.currentTarget.innerText;
                                                 setForm(prev => ({ ...prev, title: newTitle }));
                                             }}
@@ -232,7 +265,6 @@ const FormBuilder: React.FC<FormBuilderProps> = ({ form: initialForm, onSave, on
                                             contentEditable
                                             suppressContentEditableWarning
                                             onBlur={(e) => {
-                                                // Extract html before setting state
                                                 const newDesc = e.currentTarget.innerHTML;
                                                 setForm(prev => ({ ...prev, description: newDesc }));
                                             }}

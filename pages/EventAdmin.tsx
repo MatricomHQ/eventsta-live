@@ -1,6 +1,4 @@
 
-
-
 import React, { useState, useEffect, useCallback } from 'react';
 import { useParams, useNavigate, Navigate } from 'react-router-dom';
 import * as api from '../services/api';
@@ -37,10 +35,8 @@ const EventAdmin: React.FC = () => {
             return;
         }
         try {
-            await api.getEventDetails(eventId);
-            const rawEvent = api.getRawEvent(eventId);
-            const eventData = JSON.parse(JSON.stringify(rawEvent)) as EventType;
-
+            const eventData = await api.getEventDetails(eventId);
+            
             if (user && (user.isSystemAdmin || user.managedHostIds.includes(eventData.hostId))) {
                 setEvent(eventData);
             } else {

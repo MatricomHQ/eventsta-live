@@ -16,17 +16,20 @@ interface CheckoutModalProps {
   appliedDiscountPercent?: number;
 }
 
-type View = 'checkout' | 'success' | 'loading';
+type View = 'checkout' | 'success' | 'loading' | 'error';
 
 const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose, cart, event, recipientUserId, promoCode, appliedDiscountPercent }) => {
-  const { user } = useAuth();
+  const { user, refreshUser } = useAuth();
   const [view, setView] = useState<View>('checkout');
+  const [errorMessage, setErrorMessage] = useState('');
   const [platformDonation, setPlatformDonation] = useState(0);
   const [feesConfig, setFeesConfig] = useState({ percent: 5.9, fixed: 0.35 });
 
   // Fetch dynamic fee settings
   useEffect(() => {
       if (isOpen) {
+          setView('checkout');
+          setErrorMessage('');
           api.getSystemSettings().then(settings => {
               let percent = 5.9;
               let fixed = 0.35;
@@ -40,7 +43,6 @@ const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose, cart, ev
               
               setFeesConfig({ percent, fixed });
           }).catch(err => {
-              console.warn("Failed to load system settings, using defaults.", err);
               // Defaults are already set in useState
           });
       }
@@ -118,16 +120,17 @@ const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose, cart, ev
 
   // Initialize default donation when modal opens or subtotal changes significantly
   useEffect(() => {
-      if (isOpen && subtotal > 0) {
+      if (isOpen && subtotal > 0 && view === 'checkout') {
           // Default donation: 10% of subtotal, rounded UP to nearest dollar
           const defaultDonation = Math.ceil((subtotal - discount) * 0.10);
           setPlatformDonation(defaultDonation);
       }
-  }, [isOpen, subtotal, discount]);
+  }, [isOpen, subtotal, discount, view]);
 
   const handlePayment = async () => {
     if (!user) return;
     setView('loading');
+    setErrorMessage('');
     try {
       await api.purchaseTicket(
           user.id, 
@@ -137,17 +140,30 @@ const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose, cart, ev
           promoCode,
           { mandatory: mandatoryFees, donation: platformDonation }
         );
+        
+      // CRITICAL: Refresh user data to retrieve the newly purchased tickets from the backend
+      await refreshUser();
+      
       setView('success');
-    } catch (error) {
+    } catch (error: any) {
       console.error("Payment failed", error);
-      setView('checkout'); // Or an error view
+      setErrorMessage(error.message || "An unexpected error occurred during payment.");
+      setView('error');
     }
   };
 
   const handleClose = () => {
       onClose();
       // Reset view for next time modal opens
-      setTimeout(() => setView('checkout'), 300);
+      setTimeout(() => {
+          setView('checkout');
+          setErrorMessage('');
+      }, 300);
+  }
+
+  const handleRetry = () => {
+      setView('checkout');
+      setErrorMessage('');
   }
 
   return (
@@ -232,6 +248,27 @@ const CheckoutModal: React.FC<CheckoutModalProps> = ({ isOpen, onClose, cart, ev
                         </svg>
                         <span>Processing...</span>
                     </button>
+                </div>
+            )}
+            {view === 'error' && (
+                <div>
+                    <div className="p-12 text-center">
+                        <div className="w-20 h-20 bg-red-500/10 rounded-full flex items-center justify-center mx-auto mb-6">
+                            <span className="text-4xl">⚠️</span>
+                        </div>
+                        <h2 className="text-2xl font-bold text-white mb-3">Payment Failed</h2>
+                        <p className="text-red-400 mb-8 bg-red-900/20 p-4 rounded-lg border border-red-900/50 text-sm">
+                            {errorMessage}
+                        </p>
+                    </div>
+                     <div className="flex">
+                        <button onClick={handleClose} className="w-1/2 h-16 px-6 bg-neutral-800 text-neutral-300 font-semibold hover:bg-neutral-700 transition-all border-t border-neutral-700">
+                            Cancel
+                        </button>
+                        <button onClick={handleRetry} className="w-1/2 h-16 px-6 bg-purple-600 text-white font-semibold hover:bg-purple-500 transition-all">
+                            Try Again
+                        </button>
+                     </div>
                 </div>
             )}
             {view === 'success' && (

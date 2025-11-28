@@ -1,73 +1,38 @@
 
 import React, { useState, useEffect } from 'react';
-import Modal from './Modal';
 import { useAuth } from '../contexts/AuthContext';
-import { getEventDetails } from '../services/api';
-import { PurchasedTicket, Event as EventType } from '../types';
-import { CalendarIcon, MapPinIcon, UserIcon, XIcon } from './Icons';
+import { Event as EventType } from '../types';
+import { CalendarIcon, UserIcon, XIcon, MapPinIcon } from './Icons';
 import QRCode from "qrcode";
 
 interface TicketViewModalProps {
   isOpen: boolean;
   onClose: () => void;
-  ticket: PurchasedTicket | null;
+  // We pass the specific ticket details now
+  ticketData: {
+      id: string;
+      type: string;
+      name: string;
+      holderName: string;
+  } | null;
+  eventData?: EventType | null;
 }
 
-const abbreviateTicketType = (type: string): string => {
-    if (!type) return '';
-    return type
-      .split(' ')
-      .map(word => word.charAt(0))
-      .join('')
-      .toUpperCase();
-};
-
-const TicketViewModal: React.FC<TicketViewModalProps> = ({ isOpen, onClose, ticket }) => {
-  const { user } = useAuth();
-  const [event, setEvent] = useState<EventType | null>(null);
-  const [isLoading, setIsLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [activeTicketIndex, setActiveTicketIndex] = useState(0);
+const TicketViewModal: React.FC<TicketViewModalProps> = ({ isOpen, onClose, ticketData, eventData }) => {
   const [qrCodeUrl, setQrCodeUrl] = useState<string>('');
 
+  // Generate QR
   useEffect(() => {
-    if (isOpen && ticket) {
-      const fetchEvent = async () => {
-        setIsLoading(true);
-        setError(null);
-        try {
-          const eventData = await getEventDetails(ticket.eventId);
-          setEvent(eventData);
-        } catch (err) {
-          setError('Failed to load event details.');
-          console.error(err);
-        } finally {
-          setIsLoading(false);
-        }
-      };
-      fetchEvent();
-      // Reset active ticket when a new one is opened
-      setActiveTicketIndex(0);
-    }
-  }, [isOpen, ticket]);
-
-  const ticketArray = ticket ? Array.from({ length: ticket.qty }, (_, i) => i) : [];
-  
-  // This format must match the parsing logic in api.ts validateTicket
-  // Format: {orderId}-{ticketIndex}
-  const safeOrderId = ticket?.orderId || 'unknown_order';
-  const qrValue = `${safeOrderId}-${activeTicketIndex}`;
-
-  useEffect(() => {
-      if (qrValue && isOpen) {
+      if (ticketData && isOpen) {
+          const qrValue = ticketData.id; 
           QRCode.toDataURL(qrValue, { 
-              width: 300,
-              margin: 1,
+              width: 600,
+              margin: 2,
               color: {
                   dark: '#000000',
                   light: '#ffffff'
               },
-              errorCorrectionLevel: 'H'
+              errorCorrectionLevel: 'M'
           })
           .then((url) => {
               setQrCodeUrl(url);
@@ -76,95 +41,90 @@ const TicketViewModal: React.FC<TicketViewModalProps> = ({ isOpen, onClose, tick
               console.error("Error generating QR code", err);
           });
       }
-  }, [qrValue, isOpen]);
+  }, [ticketData, isOpen]);
 
-  if (!isOpen || !ticket) return null;
+  if (!isOpen || !ticketData || !eventData) return null;
 
   return (
-    <Modal isOpen={isOpen} onClose={onClose} showCloseButton={false}>
-      <div className="relative w-full max-w-4xl bg-neutral-900 border border-neutral-800 rounded-2xl shadow-2xl shadow-purple-500/10 flex flex-col md:flex-row overflow-hidden">
-        
-        {/* Custom Close Button */}
-        <button 
+    <div 
+        className="fixed inset-0 z-[100] flex items-center justify-center p-4 animate-in fade-in duration-300"
+        role="dialog"
+        aria-modal="true"
+    >
+        {/* Heavy Blur Backdrop */}
+        <div 
+            className="absolute inset-0 bg-black/80 backdrop-blur-xl transition-opacity"
             onClick={onClose}
-            className="absolute top-3 right-3 z-50 p-2 text-neutral-400 hover:text-white bg-black/40 hover:bg-black/60 backdrop-blur-md rounded-full transition-colors"
-            aria-label="Close"
-        >
-            <XIcon className="w-5 h-5" />
-        </button>
+        ></div>
 
-        <div className="w-full md:w-1/4 bg-neutral-950/50 p-4 border-b md:border-b-0 md:border-r border-neutral-800">
-            <h3 className="text-lg font-bold text-white mb-4 px-2">Tickets</h3>
-            <div className="flex md:flex-col space-x-2 md:space-x-0 md:space-y-2 overflow-x-auto md:overflow-visible pb-2 md:pb-0">
-              {ticketArray.map(index => (
-                <button
-                  key={index}
-                  onClick={() => setActiveTicketIndex(index)}
-                  className={`w-full text-left px-4 py-3 rounded-lg text-sm font-medium transition-colors flex-shrink-0 whitespace-nowrap ${
-                    activeTicketIndex === index
-                      ? 'bg-purple-600 text-white'
-                      : 'text-neutral-300 hover:bg-neutral-800'
-                  }`}
-                >
-                  {abbreviateTicketType(ticket.ticketType)} - {index + 1}
-                </button>
-              ))}
-            </div>
-        </div>
-        
-        <div className="flex-1">
-          {isLoading ? (
-            <div className="flex items-center justify-center h-full min-h-[400px]">
-              <p className="text-neutral-400">Loading Ticket...</p>
-            </div>
-          ) : error || !event ? (
-            <div className="flex items-center justify-center h-full min-h-[400px]">
-              <p className="text-red-400">{error || 'Could not load event information.'}</p>
-            </div>
-          ) : (
-            <div className="relative overflow-hidden h-full flex flex-col">
-                <div className="absolute inset-x-0 top-0 h-48">
-                    <img src={event.imageUrls[0]} alt="" className="w-full h-full object-cover filter blur-md opacity-30" />
-                    <div className="absolute inset-0 bg-gradient-to-t from-neutral-900 to-transparent"></div>
+        {/* The White Ticket Card - No Image Header, Rounded Corners */}
+        <div 
+            className="relative z-10 w-full max-w-sm bg-white text-black rounded-3xl overflow-hidden shadow-2xl transform transition-all scale-100 animate-in zoom-in-95 duration-300 max-h-[85vh] overflow-y-auto my-8"
+            style={{ 
+                boxShadow: '0 25px 50px -12px rgba(0, 0, 0, 0.5), 0 0 0 1px rgba(255,255,255,0.1)'
+            }}
+        >
+            {/* Close Button */}
+            <button 
+                onClick={onClose}
+                className="absolute top-4 right-4 z-20 p-2 bg-neutral-100 hover:bg-neutral-200 rounded-full text-neutral-500 transition-colors"
+            >
+                <XIcon className="w-5 h-5" />
+            </button>
+
+            {/* QR Code Section & Details */}
+            <div className="px-8 py-10 flex flex-col items-center text-center bg-white">
+                
+                {/* Header Info */}
+                <h2 className="text-2xl font-black text-neutral-900 mb-2 leading-tight">{eventData.title}</h2>
+                <div className="flex items-center gap-2 text-sm font-medium text-neutral-500 mb-6">
+                    <CalendarIcon className="w-4 h-4" />
+                    <span>{new Date(eventData.date).toLocaleDateString('en-US', { weekday: 'short', month: 'long', day: 'numeric' })}</span>
                 </div>
 
-                <div className="relative p-8 flex-grow flex flex-col items-center justify-center">
-                    <div className="bg-white/95 rounded-2xl p-6 md:p-8 flex flex-col items-center shadow-2xl shadow-black/50 text-black max-w-sm w-full mx-auto transform transition-all">
-                        <div className="bg-white p-1 rounded-lg mb-4 shadow-sm border border-gray-100">
-                            {qrCodeUrl ? (
-                                <img 
-                                    src={qrCodeUrl} 
-                                    alt="Ticket QR Code" 
-                                    className="w-40 h-40 object-contain"
-                                />
-                            ) : (
-                                <div className="w-40 h-40 flex items-center justify-center bg-gray-100 text-gray-400 text-xs">
-                                    Generating QR...
-                                </div>
-                            )}
-                        </div>
-                        <span className="text-xs font-mono text-neutral-500 mb-4 tracking-wider">
-                           ID: {ticket.id.slice(0, 8)}-{activeTicketIndex + 1}
-                        </span>
-                        
-                        <div className="w-full border-t border-dashed border-neutral-400 mb-4"></div>
+                {/* Ticket Type Pill */}
+                <div className="mb-6">
+                    <span className="inline-block px-4 py-1.5 bg-black text-white text-xs font-bold tracking-widest uppercase rounded-full shadow-lg">
+                        {ticketData.name}
+                    </span>
+                </div>
+                
+                {/* QR Code */}
+                <div className="mb-8 p-3 bg-white rounded-2xl border-2 border-neutral-100 shadow-sm w-64 h-64 flex items-center justify-center">
+                    {qrCodeUrl ? (
+                        <img src={qrCodeUrl} alt="QR Code" className="w-full h-full object-contain mix-blend-multiply" />
+                    ) : (
+                        <div className="animate-pulse w-full h-full bg-neutral-100 rounded-lg"></div>
+                    )}
+                </div>
 
-                        <h2 className="w-full text-xl md:text-2xl font-extrabold text-center tracking-tight mb-1 truncate" title={event.title}>{event.title}</h2>
-                        <p className="text-lg font-semibold text-purple-700 mb-4">{ticket.ticketType}</p>
-                        
-                        <div className="space-y-3 text-sm text-neutral-700 w-full">
-                            <div className="flex items-center"><UserIcon className="w-4 h-4 mr-3 flex-shrink-0" /><span className="font-medium">{user?.name}</span></div>
-                            <div className="flex items-center"><CalendarIcon className="w-4 h-4 mr-3 flex-shrink-0" /><span>{new Date(event.date).toLocaleString('en-US', { dateStyle: 'full', timeStyle: 'short' })}</span></div>
-                            <div className="flex items-center"><MapPinIcon className="w-4 h-4 mr-3 flex-shrink-0" /><span>{event.location}</span></div>
-                        </div>
+                {/* Tear Line Visual */}
+                <div className="w-full border-t-2 border-dashed border-neutral-200 mb-6 relative">
+                    <div className="absolute -left-10 -top-3 w-6 h-6 bg-black/80 rounded-full"></div> {/* Matching bg color of modal backdrop approx */}
+                    <div className="absolute -right-10 -top-3 w-6 h-6 bg-black/80 rounded-full"></div>
+                </div>
 
+                {/* Footer Details */}
+                <div className="w-full">
+                    <div className="flex flex-col items-center gap-1 text-neutral-900">
+                        <UserIcon className="w-5 h-5 text-neutral-400 mb-1" />
+                        <span className="font-bold text-lg">{ticketData.holderName}</span>
+                    </div>
+                    <div className="text-neutral-400 font-mono text-[10px] mt-2 uppercase tracking-wider">
+                        ID: {ticketData.id.split('-').slice(-2).join('-')}
                     </div>
                 </div>
             </div>
-          )}
+            
+            {/* Scan Prompt Bar */}
+            <div className="bg-neutral-50 py-3 text-center border-t border-neutral-100">
+                <p className="text-[10px] text-neutral-400 uppercase tracking-widest font-semibold flex items-center justify-center gap-2">
+                    <span className="w-1.5 h-1.5 rounded-full bg-green-500 animate-pulse"></span>
+                    Ready to Scan
+                </p>
+            </div>
         </div>
-      </div>
-    </Modal>
+    </div>
   );
 };
 
