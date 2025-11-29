@@ -3,11 +3,10 @@ import React, { useState, useMemo, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import * as api from '../services/api';
-import { PromoStat, User, Event as EventType, PayoutRequest } from '../types';
+import { PromoStat, User, Event as EventType, HostFinancials, LedgerEntry } from '../types';
 import PortalHeader from '../components/PortalHeader';
-import { TrashIcon, ClipboardIcon, MegaphoneIcon, DollarSignIcon, CreditCardIcon, ArrowRightIcon, CheckCircleIcon, ClockIcon } from '../components/Icons';
+import { TrashIcon, ClipboardIcon, MegaphoneIcon, DollarSignIcon, ArrowRightIcon, CheckCircleIcon, ClockIcon } from '../components/Icons';
 import CompetitionLeaderboard from '../components/CompetitionLeaderboard';
-import Modal from '../components/Modal';
 
 const PromoterPortal: React.FC = () => {
     const { user, isAuthenticated, refreshUser } = useAuth();
@@ -45,22 +44,36 @@ const PromotionsContent: React.FC<{ user: User, onUserUpdate: () => void }> = ({
     const [eventsMap, setEventsMap] = useState<Map<string, EventType>>(new Map());
     const [isLoadingEvents, setIsLoadingEvents] = useState(true);
     
-    const [showPayoutSetupModal, setShowPayoutSetupModal] = useState(false);
-    const [showEarlyPayoutModal, setShowEarlyPayoutModal] = useState(false);
-    const [hasPendingRequest, setHasPendingRequest] = useState(false);
-
     // Track locally deleted IDs to support optimistic UI updates when API returns stale data
     const [deletedEventIds, setDeletedEventIds] = useState<string[]>([]);
 
-    const { activePromos, currentBalance, totalEarned } = useMemo(() => {
-        const active = user.promoStats
+    // New State for Ledger
+    const [financials, setFinancials] = useState<HostFinancials | null>(null);
+    const [ledger, setLedger] = useState<LedgerEntry[]>([]);
+
+    useEffect(() => {
+        const loadFinancials = async () => {
+            try {
+                const finData = await api.getHostFinancials(user.id);
+                setFinancials(finData);
+                
+                const ledgerData = await api.getLedgerHistory(user.id);
+                setLedger(ledgerData);
+            } catch (error) {
+                console.error("Error loading financials or ledger", error);
+            }
+        };
+        loadFinancials();
+    }, [user.id]);
+
+    const activePromos = useMemo(() => {
+        return user.promoStats
             .filter(p => p.status === 'active')
             .filter(p => !deletedEventIds.includes(p.eventId)); // Filter out locally deleted items
-
-        const balance = active.reduce((sum, p) => sum + p.earned, 0);
-        const total = user.promoStats.reduce((sum, p) => sum + p.earned, 0);
-        return { activePromos: active, currentBalance: balance, totalEarned: total };
     }, [user.promoStats, deletedEventIds]);
+
+    const currentBalance = financials?.pendingBalance || 0;
+    const totalEarned = financials?.netRevenue || 0;
 
      useEffect(() => {
         const fetchEventDetails = async () => {
@@ -82,21 +95,6 @@ const PromotionsContent: React.FC<{ user: User, onUserUpdate: () => void }> = ({
 
         fetchEventDetails();
     }, [activePromos]);
-
-    // Check for pending payout requests
-    useEffect(() => {
-        const checkPendingPayouts = async () => {
-            try {
-                // Use the correct user endpoint, not admin
-                const requests = await api.getUserPayoutRequests();
-                const isPending = requests.some(r => r.status === 'pending');
-                setHasPendingRequest(isPending);
-            } catch (e) {
-                console.error("Error checking payout status", e);
-            }
-        };
-        checkPendingPayouts();
-    }, [user.id, showEarlyPayoutModal]);
 
     const handleStopPromotion = async () => {
         if (!promoToStop) return;
@@ -122,27 +120,6 @@ const PromotionsContent: React.FC<{ user: User, onUserUpdate: () => void }> = ({
         setTimeout(() => setCopiedLink(null), 2000);
     };
     
-    const handleRequestPayout = () => {
-        if (!user.stripeConnected) {
-            setShowPayoutSetupModal(true);
-        } else {
-            setShowEarlyPayoutModal(true);
-        }
-    };
-    
-    const confirmEarlyPayout = async () => {
-        try {
-            await api.requestEarlyPayout(user.id, currentBalance);
-            setShowEarlyPayoutModal(false);
-            setHasPendingRequest(true);
-            alert("Payout request submitted! You will be notified once it's approved.");
-            onUserUpdate();
-        } catch (e) {
-            console.error(e);
-            alert("Failed to submit payout request.");
-        }
-    };
-    
     const SubTabButton: React.FC<{ tabName: string, label: string }> = ({ tabName, label }) => (
         <button
             onClick={() => setActiveSubTab(tabName)}
@@ -154,6 +131,34 @@ const PromotionsContent: React.FC<{ user: User, onUserUpdate: () => void }> = ({
         </button>
     );
 
+    const TransactionRow = ({ entry }: { entry: LedgerEntry }) => (
+        <tr className="border-b border-neutral-800 hover:bg-neutral-800/30">
+            <td className="px-6 py-4 text-neutral-400 text-sm">
+                {new Date(entry.createdAt).toLocaleDateString()}
+            </td>
+            <td className="px-6 py-4">
+                <div className="font-medium text-white">{entry.description}</div>
+                <div className="text-xs text-neutral-500 font-mono mt-1">{entry.referenceId}</div>
+                <span className={`mt-1 inline-block text-[10px] font-bold px-1.5 py-0.5 rounded border uppercase ${
+                    entry.type === 'COMMISSION' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' : 
+                    entry.type === 'PAYOUT' ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' : 
+                    entry.type === 'CLAWBACK' ? 'bg-red-500/10 text-red-400 border-red-500/20' : 
+                    'bg-neutral-800 text-neutral-500 border-neutral-700'
+                }`}>
+                    {entry.type}
+                </span>
+            </td>
+            <td className={`px-6 py-4 font-mono font-bold text-right ${entry.amount >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+                {entry.amount >= 0 ? '+' : ''}{entry.amount.toFixed(2)}
+            </td>
+            <td className="px-6 py-4 text-center">
+                <span className="text-xs bg-neutral-800 text-neutral-400 px-2 py-1 rounded">
+                    {entry.status}
+                </span>
+            </td>
+        </tr>
+    );
+
     return (
         <div>
             {/* Header Stats */}
@@ -161,25 +166,6 @@ const PromotionsContent: React.FC<{ user: User, onUserUpdate: () => void }> = ({
                 <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6 relative">
                     <h3 className="text-sm font-medium text-neutral-400 mb-2">Current Balance</h3>
                     <p className="text-4xl font-bold text-green-400 text-glow">${currentBalance.toFixed(2)}</p>
-                    {currentBalance > 0 && (
-                        <button 
-                            onClick={handleRequestPayout}
-                            disabled={hasPendingRequest}
-                            className={`mt-4 w-full py-2 bg-green-600/20 text-green-400 border border-green-600/30 rounded-lg transition-colors flex items-center justify-center gap-2 ${hasPendingRequest ? 'opacity-50 cursor-not-allowed' : 'hover:bg-green-600/30'}`}
-                        >
-                            {hasPendingRequest ? (
-                                <>
-                                    <ClockIcon className="w-4 h-4" />
-                                    <span className="text-sm font-semibold">Payout Requested</span>
-                                </>
-                            ) : (
-                                <>
-                                    <DollarSignIcon className="w-4 h-4" />
-                                    <span className="text-sm font-semibold">Request Early Payout</span>
-                                </>
-                            )}
-                        </button>
-                    )}
                 </div>
                 <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6">
                     <h3 className="text-sm font-medium text-neutral-400 mb-2">Total Earned (All Time)</h3>
@@ -194,6 +180,7 @@ const PromotionsContent: React.FC<{ user: User, onUserUpdate: () => void }> = ({
             {/* Sub-tabs */}
             <div className="flex items-center space-x-2 mb-8">
                 <SubTabButton tabName="active" label={`Active Promotions (${activePromos.length})`} />
+                <SubTabButton tabName="transactions" label="Transaction History" />
                 <SubTabButton tabName="payouts" label={`Payout History (${user.payouts.length})`} />
             </div>
 
@@ -241,6 +228,33 @@ const PromotionsContent: React.FC<{ user: User, onUserUpdate: () => void }> = ({
                             <h3 className="text-xl font-bold text-white">No Active Promotions</h3>
                             <p className="text-neutral-500 mt-2 mb-6">Find an event you love and start promoting to earn commissions.</p>
                             <button onClick={() => navigate('/')} className="px-5 py-2 bg-purple-600 text-white text-sm font-semibold rounded-full hover:bg-purple-500 transition-all duration-300 shadow-lg shadow-purple-500/20">Discover Events</button>
+                        </div>
+                    )}
+                </div>
+            )}
+
+            {activeSubTab === 'transactions' && (
+                <div className="bg-neutral-900 border border-neutral-800 rounded-2xl overflow-hidden">
+                    {ledger.length > 0 ? (
+                        <table className="w-full text-left">
+                            <thead className="bg-neutral-950 border-b border-neutral-800 text-xs text-neutral-500 uppercase">
+                                <tr>
+                                    <th className="px-6 py-4">Date</th>
+                                    <th className="px-6 py-4">Description</th>
+                                    <th className="px-6 py-4 text-right">Amount</th>
+                                    <th className="px-6 py-4 text-center">Status</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {ledger.map(entry => (
+                                    <TransactionRow key={entry.id} entry={entry} />
+                                ))}
+                            </tbody>
+                        </table>
+                    ) : (
+                        <div className="text-center py-16">
+                            <h3 className="text-xl font-bold text-white">No Transactions Yet</h3>
+                            <p className="text-neutral-500 mt-2">Transactions from your sales and payouts will appear here.</p>
                         </div>
                     )}
                 </div>
@@ -293,65 +307,6 @@ const PromotionsContent: React.FC<{ user: User, onUserUpdate: () => void }> = ({
                     </div>
                 </div>
             )}
-
-            <Modal isOpen={showPayoutSetupModal} onClose={() => setShowPayoutSetupModal(false)}>
-                <div className="w-full max-w-sm bg-neutral-900 border border-neutral-800 rounded-2xl p-8 text-center shadow-2xl">
-                    <div className="w-16 h-16 bg-neutral-800 rounded-full flex items-center justify-center mx-auto mb-4 border border-neutral-700">
-                        <CreditCardIcon className="w-8 h-8 text-neutral-400" />
-                    </div>
-                    <h3 className="text-xl font-bold text-white mb-2">Payout Setup Required</h3>
-                    <p className="text-neutral-400 mb-6 text-sm">You need to connect your bank account via Stripe before you can request a payout.</p>
-                    <button 
-                        onClick={() => navigate('/settings', { state: { defaultTab: 'payouts' } })}
-                        className="w-full px-6 py-3 bg-purple-600 hover:bg-purple-500 text-white font-bold rounded-full transition-colors flex items-center justify-center gap-2"
-                    >
-                        Connect Bank Account <ArrowRightIcon className="w-4 h-4" />
-                    </button>
-                </div>
-            </Modal>
-
-            <Modal isOpen={showEarlyPayoutModal} onClose={() => setShowEarlyPayoutModal(false)}>
-                <div className="w-full max-w-md bg-neutral-900 border border-neutral-800 rounded-2xl overflow-hidden shadow-2xl">
-                    <div className="p-8">
-                        <div className="w-16 h-16 bg-green-500/10 rounded-full flex items-center justify-center mx-auto mb-6 border border-green-500/20">
-                            <DollarSignIcon className="w-8 h-8 text-green-400" />
-                        </div>
-                        <h3 className="text-2xl font-bold text-white text-center mb-2">Request Early Payout</h3>
-                        <p className="text-neutral-400 text-center text-sm mb-8">
-                            Instead of waiting for the standard monthly payout schedule, you can request to have your funds transferred immediately.
-                        </p>
-                        
-                        <div className="bg-neutral-800 rounded-xl p-4 space-y-3 border border-neutral-700">
-                            <div className="flex justify-between text-sm">
-                                <span className="text-neutral-400">Gross Amount</span>
-                                <span className="text-white font-medium">${currentBalance.toFixed(2)}</span>
-                            </div>
-                            <div className="flex justify-between text-sm">
-                                <span className="text-neutral-400">Instant Transfer Fee (2%)</span>
-                                <span className="text-red-400 font-medium">-${(currentBalance * 0.02).toFixed(2)}</span>
-                            </div>
-                            <div className="border-t border-neutral-700 pt-3 flex justify-between items-center">
-                                <span className="text-white font-semibold">Net Payout</span>
-                                <span className="text-green-400 font-bold text-xl">${(currentBalance * 0.98).toFixed(2)}</span>
-                            </div>
-                        </div>
-                    </div>
-                    <div className="bg-neutral-800/50 p-6 flex justify-center gap-4 border-t border-neutral-800">
-                        <button 
-                            onClick={() => setShowEarlyPayoutModal(false)}
-                            className="px-6 py-2.5 text-sm font-semibold text-neutral-300 hover:text-white transition-colors"
-                        >
-                            Cancel
-                        </button>
-                        <button 
-                            onClick={confirmEarlyPayout}
-                            className="px-6 py-2.5 bg-green-600 hover:bg-green-500 text-white font-bold rounded-full shadow-lg shadow-green-600/20 transition-colors"
-                        >
-                            Confirm & Payout
-                        </button>
-                    </div>
-                </div>
-            </Modal>
         </div>
     );
 };

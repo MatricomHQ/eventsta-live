@@ -25,7 +25,7 @@ const SystemAdmin = React.lazy(() => import('./pages/SystemAdmin'));
 const AppContent: React.FC = () => {
   const location = useLocation();
   const navigate = useNavigate(); // Use hook inside component within Router context
-  const { login, user, refreshUser } = useAuth();
+  const { login, user, refreshUser, isLoading } = useAuth();
   
   // Maintenance Mode State
   const [isMaintenanceMode, setIsMaintenanceMode] = useState(false);
@@ -113,6 +113,15 @@ const AppContent: React.FC = () => {
     },
     disabled: !!user, // Do not show if user is already logged in
   });
+  
+  // Show loading spinner while restoring session
+  if (isLoading) {
+      return (
+          <div className="flex items-center justify-center h-screen bg-[#0a0a0a]">
+              <div className="w-8 h-8 border-4 border-purple-600 border-t-transparent rounded-full animate-spin"></div>
+          </div>
+      );
+  }
   
   // Determine if the current page renders its own background (like a blurred hero image).
   // We exclude the event admin pages (containing '/admin/') so they use the standard dark background.

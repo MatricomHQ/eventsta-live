@@ -1,5 +1,5 @@
 
-import { Event, User, Host, PromoStat, ReportData, Order, SalesByTicketType, PromoterReport, PromoCode, OrderLineItem, LeaderboardEntry, CheckoutCart, Competition, VenueArea, ScheduleItem, ArtistProfile, EmailDraft, EmailCampaign, TargetRole, CompetitionForm, PurchasedTicket, PayoutRequest, NotificationPreferences, HostFinancials, SystemEmailTemplate, SystemEmailTrigger, SystemSettings, TicketOption, Review, Payout } from '../types';
+import { Event, User, Host, PromoStat, ReportData, Order, SalesByTicketType, PromoterReport, PromoCode, OrderLineItem, LeaderboardEntry, CheckoutCart, Competition, VenueArea, ScheduleItem, ArtistProfile, EmailDraft, EmailCampaign, TargetRole, CompetitionForm, PurchasedTicket, PayoutRequest, NotificationPreferences, HostFinancials, SystemEmailTemplate, SystemEmailTrigger, SystemSettings, TicketOption, Review, Payout, LedgerEntry } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import { createEventSlug } from '../utils/url';
 import * as emailService from './emailService';
@@ -929,6 +929,25 @@ export const getHostFinancials = async (userId: string): Promise<HostFinancials>
         totalPayouts: typeof raw.totalPayouts === 'number' ? raw.totalPayouts : 0,
         payouts: Array.isArray(raw.payouts) ? raw.payouts : []
     };
+};
+export const getLedgerHistory = async (userId: string): Promise<LedgerEntry[]> => {
+    console.info(`[ACTION] getLedgerHistory: ${userId}`);
+    try {
+        const raw = await request<any[]>(`/users/${userId}/ledger`);
+        return raw.map(entry => ({
+            id: entry.id,
+            userId: entry.user_id,
+            type: entry.type,
+            amount: entry.amount,
+            referenceId: entry.reference_id,
+            description: entry.description,
+            status: entry.status,
+            createdAt: entry.created_at
+        }));
+    } catch (e) {
+        console.warn("Failed to fetch ledger history", e);
+        return [];
+    }
 };
 export const getAllEventsAdmin = async (page: number, limit: number, search: string) => {
     console.info(`[ACTION] getAllEventsAdmin`);

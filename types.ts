@@ -367,3 +367,15 @@ export interface SystemSettings {
     maintenanceMode: boolean;
     disableRegistration: boolean;
 }
+
+// NEW: Ledger Entry
+export interface LedgerEntry {
+    id: string;
+    userId: string;
+    type: 'COMMISSION' | 'PAYOUT' | 'CLAWBACK';
+    amount: number;
+    referenceId: string;
+    description: string;
+    status: 'CLEARED' | 'PENDING';
+    createdAt: string;
+}
