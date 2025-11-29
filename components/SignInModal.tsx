@@ -2,7 +2,7 @@
 import React, { useState, useEffect } from 'react';
 import Modal from './Modal';
 import { useAuth } from '../contexts/AuthContext';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useLocation } from 'react-router-dom';
 import { ShieldIcon, GoogleIcon, ArrowLeftIcon, MailIcon, XIcon, PlayCircleIcon } from './Icons';
 import { User } from '../types';
 import * as api from '../services/api';
@@ -15,19 +15,34 @@ interface SignInModalProps {
   context?: 'default' | 'application'; // New prop
 }
 
-const determineRedirectPath = async (user: User): Promise<string> => {
-    // Check if there is a pending checkout return path
+const determineRedirectPath = async (user: User, currentPath: string): Promise<string | null> => {
+    // 1. Check if there is a pending checkout return path (Highest Priority)
+    // This happens if a user clicked "Checkout" and was forced to login.
     const pendingEventId = sessionStorage.getItem('pendingCheckoutEventId');
     if (pendingEventId) {
+        // FIX: Re-attach promo code to the URL if it exists, ensuring attribution persists
+        const pendingPromo = sessionStorage.getItem('pendingCheckoutPromoCode');
+        if (pendingPromo) {
+            return `/event/${pendingEventId}?promo=${pendingPromo}`;
+        }
         return `/event/${pendingEventId}`;
     }
 
-    // 0. Check for System Admin
+    // 2. Context Preservation
+    // If the user is currently on an event page or a form, we generally want to keep them there
+    // so they can continue their journey (viewing event, using promo code, filling form).
+    if (currentPath.startsWith('/event/') || currentPath.startsWith('/form/')) {
+        return null; // Stay on current page
+    }
+
+    // 3. Role-based Routing (Only for users logging in from generic pages like Home)
+    
+    // Check for System Admin
     if (user.isSystemAdmin) {
         return '/system-admin';
     }
 
-    // 1. Check for active hosting (upcoming events)
+    // Check for active hosting (upcoming events)
     if (user.managedHostIds && user.managedHostIds.length > 0) {
         const hosts = await api.getHostsByIds(user.managedHostIds);
         const allEventIds = hosts.flatMap(h => h.eventIds);
@@ -40,24 +55,25 @@ const determineRedirectPath = async (user: User): Promise<string> => {
         }
     }
 
-    // 2. Check for active promotions
+    // Check for active promotions
     if (user.promoStats && user.promoStats.some(p => p.status === 'active')) {
         return '/promotions';
     }
 
-    // 3. Check for purchased tickets
+    // Check for purchased tickets
     if (user.purchasedTickets && user.purchasedTickets.length > 0) {
         return '/my-tickets';
     }
 
-    // 4. Default to homepage
-    return '/';
+    // 4. Default: Stay on current page (Important for new users)
+    return null;
 };
 
 
 const SignInModal: React.FC<SignInModalProps> = ({ isOpen, onClose, context = 'default' }) => {
   const { login, isLoading, refreshUser } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   
   // Flow State
   const [view, setView] = useState<'main' | 'email' | 'name_input' | 'forgot_password'>('main');
@@ -111,8 +127,8 @@ const SignInModal: React.FC<SignInModalProps> = ({ isOpen, onClose, context = 'd
 
               onClose();
               if (context === 'default') {
-                  const destination = await determineRedirectPath(user);
-                  navigate(destination);
+                  const destination = await determineRedirectPath(user, location.pathname);
+                  if (destination) navigate(destination);
               }
           }
       } catch (error) {
@@ -127,8 +143,8 @@ const SignInModal: React.FC<SignInModalProps> = ({ isOpen, onClose, context = 'd
               
               onClose();
               if (user && context === 'default') {
-                  const destination = await determineRedirectPath(user);
-                  navigate(destination);
+                  const destination = await determineRedirectPath(user, location.pathname);
+                  if (destination) navigate(destination);
               }
           } catch (regError: any) {
               setError(regError.message || "Registration failed.");
@@ -189,8 +205,8 @@ const SignInModal: React.FC<SignInModalProps> = ({ isOpen, onClose, context = 'd
           if (user) {
               onClose();
               if (context === 'default') {
-                  const destination = await determineRedirectPath(user);
-                  navigate(destination);
+                  const destination = await determineRedirectPath(user, location.pathname);
+                  if (destination) navigate(destination);
               }
           }
       } catch (err: any) {
@@ -222,8 +238,8 @@ const SignInModal: React.FC<SignInModalProps> = ({ isOpen, onClose, context = 'd
           
           onClose();
           if (user && context === 'default') {
-              const destination = await determineRedirectPath(user);
-              navigate(destination);
+              const destination = await determineRedirectPath(user, location.pathname);
+              if (destination) navigate(destination);
           }
       } catch (regError: any) {
           setError(regError.message || "Registration failed.");
@@ -261,8 +277,8 @@ const SignInModal: React.FC<SignInModalProps> = ({ isOpen, onClose, context = 'd
           const user = await login('demo');
           onClose();
           if (user && context === 'default') {
-              const destination = await determineRedirectPath(user);
-              navigate(destination);
+              const destination = await determineRedirectPath(user, location.pathname);
+              if (destination) navigate(destination);
           }
       } catch (error) {
           setError("Demo login failed.");

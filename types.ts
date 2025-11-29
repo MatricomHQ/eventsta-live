@@ -240,6 +240,7 @@ export interface OrderLineItem {
 export interface Order {
     orderId: string;
     eventId: string;
+    userId?: string; // The authenticated user ID of the purchaser (used to fetch details if name/email missing)
     purchaserName: string;
     purchaserEmail: string;
     purchaseDate: string;
@@ -248,6 +249,7 @@ export interface Order {
     status: 'Completed' | 'Refunded';
     promoCode?: string;
     recipientUserId?: string;
+    recipientUserName?: string; // NEW: The resolved name of the promoter/affiliate
     fees?: {
         mandatory: number;
         donation: number;

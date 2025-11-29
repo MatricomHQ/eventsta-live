@@ -856,6 +856,7 @@ const AdminSystemEmailsManager: React.FC = () => {
 const AdminPayoutsManager: React.FC = () => {
     const [requests, setRequests] = useState<PayoutRequest[]>([]);
     const [loading, setLoading] = useState(true);
+    const [isProcessing, setIsProcessing] = useState(false);
 
     const fetchRequests = async () => {
         setLoading(true);
@@ -873,9 +874,37 @@ const AdminPayoutsManager: React.FC = () => {
         }
     };
 
+    const handleBackfill = async () => {
+        if (!window.confirm("Are you sure? This will recalculate missing commissions for all completed orders based on proper attribution rules.")) return;
+        setIsProcessing(true);
+        try {
+            const res = await api.backfillCommissions();
+            alert(`Backfill Complete! ${res.message || 'Processed.'}`);
+        } catch (e) {
+            console.error(e);
+            alert("Failed to run backfill script.");
+        } finally {
+            setIsProcessing(false);
+        }
+    };
+
     return (
         <div className="space-y-6 animate-fade-in">
-            <h2 className="text-2xl font-bold text-white">Payout Requests</h2>
+            <div className="flex justify-between items-center">
+                <h2 className="text-2xl font-bold text-white">Payout Requests</h2>
+                <div className="flex gap-2">
+                    <button 
+                        onClick={handleBackfill} 
+                        disabled={isProcessing}
+                        className="px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 hover:text-white text-sm font-medium rounded-lg transition-colors border border-neutral-700 flex items-center gap-2"
+                        title="Re-run commission logic for past orders to fix missing ledger entries"
+                    >
+                        <RefreshCwIcon className={`w-4 h-4 ${isProcessing ? 'animate-spin' : ''}`} />
+                        {isProcessing ? 'Processing...' : 'Data Reconciliation (Backfill)'}
+                    </button>
+                </div>
+            </div>
+            
             <div className="bg-neutral-900 border border-neutral-800 rounded-2xl overflow-hidden">
                 <table className="w-full text-sm text-left text-neutral-300">
                     <thead className="text-xs text-neutral-500 uppercase bg-neutral-950 border-b border-neutral-800">

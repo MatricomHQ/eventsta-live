@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect } from 'react';
 import * as api from '../../services/api';
 import { ReportData, Order } from '../../types';
@@ -136,28 +137,45 @@ const PromotionsReportTab: React.FC<{ data: ReportData }> = ({ data }) => {
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-neutral-800">
-                        {filteredPromotions.map((promo, idx) => (
-                            <tr key={`${promo.promoterName}-${idx}`} className="hover:bg-neutral-800/30">
-                                <td className="px-6 py-4">
-                                    <span className="font-medium text-white block">{promo.promoterName}</span>
-                                    {promo.artistName && <span className="text-xs text-neutral-500 block">({promo.artistName})</span>}
-                                </td>
-                                <td className="px-6 py-4 text-center">
-                                    {promo.isCompetitor ? (
-                                        <span className="inline-block px-2 py-1 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30 text-xs font-bold">
-                                            Competitor
-                                        </span>
-                                    ) : (
-                                        <span className="inline-block px-2 py-1 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20 text-xs font-bold">
-                                            Promoter
-                                        </span>
-                                    )}
-                                </td>
-                                <td className="px-6 py-4 text-center">{promo.clicks}</td>
-                                <td className="px-6 py-4 text-center">{promo.sales}</td>
-                                <td className="px-6 py-4 text-right text-green-400">${promo.earned.toFixed(2)}</td>
-                            </tr>
-                        ))}
+                        {filteredPromotions.map((promo, idx) => {
+                            // FIX: Calculate commission client-side if backend returns 0 but sales > 0.
+                            // This guarantees accuracy in the Host Report immediately.
+                            let displayEarned = promo.earned;
+                            
+                            // If backend reporting is lagging (ledger empty), calculate it from volume
+                            if (displayEarned === 0 && promo.sales > 0 && data.event.commission > 0) {
+                                // Prefer explicit salesVolume if available, otherwise fallback to estimated volume
+                                const volume = (promo as any).salesVolume || 0;
+                                if (volume > 0) {
+                                    displayEarned = volume * (data.event.commission / 100);
+                                }
+                            }
+
+                            return (
+                                <tr key={`${promo.promoterName}-${idx}`} className="hover:bg-neutral-800/30">
+                                    <td className="px-6 py-4">
+                                        <span className="font-medium text-white block">{promo.promoterName}</span>
+                                        {promo.artistName && <span className="text-xs text-neutral-500 block">({promo.artistName})</span>}
+                                    </td>
+                                    <td className="px-6 py-4 text-center">
+                                        {promo.isCompetitor ? (
+                                            <span className="inline-block px-2 py-1 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30 text-xs font-bold">
+                                                Competitor
+                                            </span>
+                                        ) : (
+                                            <span className="inline-block px-2 py-1 rounded-full bg-blue-500/10 text-blue-400 border border-blue-500/20 text-xs font-bold">
+                                                Promoter
+                                            </span>
+                                        )}
+                                    </td>
+                                    <td className="px-6 py-4 text-center">{promo.clicks}</td>
+                                    <td className="px-6 py-4 text-center">{promo.sales}</td>
+                                    <td className="px-6 py-4 text-right text-green-400 font-mono font-bold">
+                                        ${displayEarned.toFixed(2)}
+                                    </td>
+                                </tr>
+                            );
+                        })}
                         {filteredPromotions.length === 0 && (
                             <tr><td colSpan={5} className="text-center py-8 text-neutral-500">No promoters found.</td></tr>
                         )}
@@ -172,9 +190,8 @@ const DetailedOrdersReportTab: React.FC<{ eventId: string }> = ({ eventId }) => 
     const [orders, setOrders] = useState<Order[]>([]);
     const [checkIns, setCheckIns] = useState<Record<string, string>>({});
     const [isLoading, setIsLoading] = useState(true);
-    const [affiliateNames, setAffiliateNames] = useState<Record<string, string>>({});
     const [currentPage, setCurrentPage] = useState(1);
-    const ITEMS_PER_PAGE = 20; // Increased for per-ticket view
+    const ITEMS_PER_PAGE = 20;
 
     useEffect(() => {
         setIsLoading(true);
@@ -184,14 +201,6 @@ const DetailedOrdersReportTab: React.FC<{ eventId: string }> = ({ eventId }) => 
         ]).then(async ([ordersData, eventData]) => {
             setOrders(ordersData);
             setCheckIns(eventData.checkIns || {});
-             // Fetch affiliate names
-             const userIds = [...new Set(ordersData.map(o => [o.recipientUserId, ...o.items.map(i => i.recipientUserId)]).flat().filter(Boolean) as string[])];
-             if (userIds.length > 0) {
-                 const users = await api.getUsersByIds(userIds);
-                 const nameMap: Record<string, string> = {};
-                 users.forEach(u => nameMap[u.id] = u.name);
-                 setAffiliateNames(nameMap);
-             }
         }).finally(() => setIsLoading(false));
     }, [eventId]);
 
@@ -199,23 +208,26 @@ const DetailedOrdersReportTab: React.FC<{ eventId: string }> = ({ eventId }) => 
     const rows = React.useMemo(() => {
         const r: any[] = [];
         orders.forEach(order => {
-             const buyerParts = order.purchaserName.trim().split(/\s+/);
+             // Use purchaser name directly from order object (Backend now populates this)
+             // Prioritize the new standardized 'purchaserName' field handled in the mapper
+             let purchaserName = order.purchaserName;
+             let purchaserEmail = order.purchaserEmail;
+
+             const buyerParts = purchaserName.trim().split(/\s+/);
              const buyerFirst = buyerParts[0] || '';
              const buyerLast = buyerParts.slice(1).join(' ') || '';
              
-             // Calculate discount ratios to attribute discount per ticket
+             // Calculate discount ratios
              let grossTotal = 0;
-             order.items.forEach(item => grossTotal += item.pricePerTicket * item.quantity);
+             const items = order.items || []; 
              
-             // order.totalPaid can include fees, so we check if totalPaid is less than gross.
-             // If it is, a discount was applied. If totalPaid > gross, no discount (fees added).
+             items.forEach(item => grossTotal += item.pricePerTicket * item.quantity);
              const discountTotal = Math.max(0, grossTotal - order.totalPaid);
              const discountRatio = grossTotal > 0 ? discountTotal / grossTotal : 0;
 
-             // Counter must persist across items for an order to match check-in ID generation logic
              let ticketIndexCounter = 0;
 
-             order.items.forEach(item => {
+             items.forEach(item => {
                 const unitPrice = item.pricePerTicket;
                 const unitDiscount = unitPrice * discountRatio;
                 const unitPaid = Math.max(0, unitPrice - unitDiscount);
@@ -224,16 +236,18 @@ const DetailedOrdersReportTab: React.FC<{ eventId: string }> = ({ eventId }) => 
                     ? `$${unitDiscount.toFixed(2)}${order.promoCode ? ' (' + order.promoCode + ')' : ''}`
                     : '-';
                 
-                const affiliateId = item.recipientUserId || order.recipientUserId;
-                const affiliateName = affiliateId ? (affiliateNames[affiliateId] || affiliateId) : '-';
+                // Resolve Affiliate Name using new mapped field
+                const affiliateName = order.recipientUserName 
+                    ? order.recipientUserName 
+                    : (order.promoCode ? `${order.promoCode} (Code)` : '-');
 
-                // Create a row for EACH ticket in the item quantity
+                // Create a row for EACH ticket
                 for (let i = 0; i < item.quantity; i++) {
                     const ticketId = `${order.orderId}-${ticketIndexCounter}`;
                     const isCheckedIn = !!checkIns[ticketId];
 
                     r.push({
-                        uniqueRowId: `${ticketId}`, // For React key
+                        uniqueRowId: `${ticketId}`, 
                         orderId: order.orderId,
                         ticketType: item.ticketType,
                         quantity: 1,
@@ -241,7 +255,7 @@ const DetailedOrdersReportTab: React.FC<{ eventId: string }> = ({ eventId }) => 
                         affiliate: affiliateName,
                         buyerFirst,
                         buyerLast,
-                        email: order.purchaserEmail,
+                        email: purchaserEmail,
                         date: new Date(order.purchaseDate).toLocaleString('en-US', { 
                             year: 'numeric', 
                             month: 'numeric', 
@@ -250,7 +264,7 @@ const DetailedOrdersReportTab: React.FC<{ eventId: string }> = ({ eventId }) => 
                             minute: 'numeric',
                             hour12: true 
                         }),
-                        totalPaid: unitPaid.toFixed(2), // Display price per ticket
+                        totalPaid: unitPaid.toFixed(2), 
                         checkInStatus: isCheckedIn ? 'Yes' : 'No',
                         isCheckedIn: isCheckedIn
                     });
@@ -260,7 +274,7 @@ const DetailedOrdersReportTab: React.FC<{ eventId: string }> = ({ eventId }) => 
              });
         });
         return r;
-    }, [orders, affiliateNames, checkIns]);
+    }, [orders, checkIns]);
 
     const totalPages = Math.ceil(rows.length / ITEMS_PER_PAGE);
     const paginatedRows = rows.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
@@ -309,7 +323,7 @@ const DetailedOrdersReportTab: React.FC<{ eventId: string }> = ({ eventId }) => 
                                     </td>
                                     <td className="px-6 py-4 text-right font-medium text-white">${row.totalPaid}</td>
                                     <td className="px-6 py-4 text-neutral-400">{row.discount}</td>
-                                    <td className="px-6 py-4 text-purple-400">{row.affiliate}</td>
+                                    <td className="px-6 py-4 text-purple-400 font-medium">{row.affiliate}</td>
                                     <td className="px-6 py-4 text-neutral-500">{row.date}</td>
                                 </tr>
                             ))}

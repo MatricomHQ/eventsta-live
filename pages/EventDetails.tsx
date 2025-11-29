@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useParams, Link, useLocation } from 'react-router-dom';
 import * as api from '../services/api';
@@ -208,10 +209,35 @@ const EventDetails: React.FC = () => {
           
           if (pendingEventId === id) {
               const savedCart = sessionStorage.getItem('pendingCheckoutCart');
+              const savedPromoCode = sessionStorage.getItem('pendingCheckoutPromoCode');
+
               if (savedCart) {
                   try {
                       const parsedCart = JSON.parse(savedCart);
                       setCart(parsedCart);
+                      
+                      // Restore Promo Code logic
+                      if (savedPromoCode) {
+                          console.debug(`[Promo Debug] ♻️ Restoring promo code from session: ${savedPromoCode}`);
+                          setUrlTrackingCode(savedPromoCode);
+                          setPromoCodeInput(savedPromoCode);
+                          
+                          // Re-validate to get discount applied if valid
+                          api.validatePromoCode(id, savedPromoCode).then(result => {
+                              if (result.valid) {
+                                  setAppliedPromoCode({
+                                      id: 'validated-code',
+                                      eventId: id,
+                                      code: result.code,
+                                      discountPercent: result.discountPercent,
+                                      uses: 0,
+                                      maxUses: null,
+                                      isActive: true
+                                  });
+                              }
+                          }).catch(e => console.warn("Failed to re-validate restored promo code", e));
+                      }
+
                       setCheckoutModalOpen(true);
                   } catch (e) {
                       console.error("Failed to restore cart", e);
@@ -220,6 +246,7 @@ const EventDetails: React.FC = () => {
               // Clear storage
               sessionStorage.removeItem('pendingCheckoutEventId');
               sessionStorage.removeItem('pendingCheckoutCart');
+              sessionStorage.removeItem('pendingCheckoutPromoCode');
           }
       }
   }, [isAuthenticated, id]);
@@ -422,6 +449,12 @@ const EventDetails: React.FC = () => {
           if (event) {
               sessionStorage.setItem('pendingCheckoutEventId', event.id);
               sessionStorage.setItem('pendingCheckoutCart', JSON.stringify(cart));
+              // Save Promo Code State
+              if (appliedPromoCode) {
+                  sessionStorage.setItem('pendingCheckoutPromoCode', appliedPromoCode.code);
+              } else if (urlTrackingCode) {
+                  sessionStorage.setItem('pendingCheckoutPromoCode', urlTrackingCode);
+              }
           }
           setSignInModalOpen(true);
       } else {

@@ -85,6 +85,7 @@ const OrderListView: React.FC<{
                                     <th scope="col" className="px-6 py-3">Purchaser</th>
                                     <th scope="col" className="px-6 py-3">Date</th>
                                     <th scope="col" className="px-6 py-3 text-center">Items</th>
+                                    <th scope="col" className="px-6 py-3 text-center">Affiliate</th>
                                     <th scope="col" className="px-6 py-3 text-center">Status</th>
                                     <th scope="col" className="px-6 py-3 text-right">Total Paid</th>
                                 </tr>
@@ -92,15 +93,23 @@ const OrderListView: React.FC<{
                             <tbody>
                                 {paginatedOrders.map(order => (
                                     <tr key={order.orderId} onClick={() => onOrderSelect(order.orderId)} className="border-b border-neutral-800 hover:bg-neutral-800/50 cursor-pointer">
-                                        <td className="px-6 py-4 font-medium text-white whitespace-nowrap">{order.purchaserName}</td>
-                                        <td className="px-6 py-4">{new Date(order.purchaseDate).toLocaleDateString()}</td>
+                                        <td className="px-6 py-4">
+                                            <div className="flex flex-col">
+                                                <span className="font-medium text-white whitespace-nowrap">{order.purchaserName}</span>
+                                                <span className="text-xs text-neutral-500">{order.purchaserEmail}</span>
+                                            </div>
+                                        </td>
+                                        <td className="px-6 py-4 text-xs text-neutral-400">{new Date(order.purchaseDate).toLocaleDateString()}</td>
                                         <td className="px-6 py-4 text-center">{order.items.reduce((sum, item) => sum + item.quantity, 0)}</td>
+                                        <td className="px-6 py-4 text-center text-purple-400 font-medium">
+                                            {order.recipientUserName ? order.recipientUserName : (order.promoCode ? order.promoCode : '-')}
+                                        </td>
                                         <td className="px-6 py-4 text-center">
                                             <span className={`px-2 py-1 text-xs font-medium rounded-full ${order.status === 'Completed' ? 'bg-green-500/10 text-green-400' : 'bg-red-500/10 text-red-400'}`}>
                                                 {order.status}
                                             </span>
                                         </td>
-                                        <td className="px-6 py-4 text-right font-semibold">${order.totalPaid.toFixed(2)}</td>
+                                        <td className="px-6 py-4 text-right font-semibold text-white">${order.totalPaid.toFixed(2)}</td>
                                     </tr>
                                 ))}
                             </tbody>
@@ -192,8 +201,8 @@ const OrderDetailView: React.FC<{ order: Order, onOrderUpdate: (order: Order) =>
                                     <span className="text-white font-medium text-sm">{order.promoCode || '-'}</span>
                                 </div>
                                 <div className="flex justify-between items-center">
-                                    <span className="text-neutral-400 text-sm">Affiliate ID</span>
-                                    <span className="text-white font-medium text-sm font-mono">{order.recipientUserId || '-'}</span>
+                                    <span className="text-neutral-400 text-sm">Affiliate</span>
+                                    <span className="text-white font-medium text-sm">{order.recipientUserName || order.recipientUserId || '-'}</span>
                                 </div>
                             </div>
                         </div>

@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo, useEffect } from 'react';
 import { useAuth } from '../contexts/AuthContext';
 import { useNavigate } from 'react-router-dom';
@@ -78,10 +79,10 @@ const PromotionsContent: React.FC<{ user: User, onUserUpdate: () => void }> = ({
     const [financials, setFinancials] = useState<HostFinancials | null>(null);
     const [ledger, setLedger] = useState<LedgerEntry[]>([]);
 
-    // ADD THIS EFFECT: Force a refresh of user data (including promoStats) on mount
+    // Force a refresh of user data (including promoStats) on mount
     useEffect(() => {
         onUserUpdate();
-    }, []); // Empty dependency array ensures this runs once when the tab opens
+    }, []);
 
     useEffect(() => {
         const loadFinancials = async () => {
@@ -103,6 +104,59 @@ const PromotionsContent: React.FC<{ user: User, onUserUpdate: () => void }> = ({
             .filter(p => p.status === 'active')
             .filter(p => !deletedEventIds.includes(p.eventId)); // Filter out locally deleted items
     }, [user.promoStats, deletedEventIds]);
+
+    // Fix: Client-side aggregation of ledger to patch missing API stats
+    const ledgerStatsByEvent = useMemo(() => {
+        const stats: Record<string, { earned: number, sales: number }> = {};
+        
+        ledger.forEach(entry => {
+            if (entry.type !== 'COMMISSION') return;
+            // Extract Event Name from Description: "Commission for order #... (Event Name)"
+            const match = entry.description.match(/\((.+)\)$/);
+            
+            if (match && match[1]) {
+                const eventName = match[1].trim();
+                
+                if (eventName) {
+                    if (!stats[eventName]) {
+                        stats[eventName] = { earned: 0, sales: 0 };
+                    }
+                    stats[eventName].earned += entry.amount;
+                    stats[eventName].sales += 1;
+                }
+            }
+        });
+        return stats;
+    }, [ledger]);
+
+    const displayedPromos = useMemo(() => {
+        return activePromos.map(promo => {
+            // FIX: If API returns 0 earned but we have sales volume, calculate it ourselves
+            // This is the "Real Time Self-Healing" logic for the frontend view
+            let finalEarned = promo.earned;
+            
+            // If we have sales volume data (from new API fields) but 0 earned
+            const salesVol = (promo as any).salesVolume || (promo as any).sales_volume || 0;
+            if (finalEarned === 0 && salesVol > 0 && promo.commissionPct > 0) {
+                finalEarned = salesVol * (promo.commissionPct / 100);
+            }
+
+            // Also check ledger as a secondary source of truth
+            const ledgerStat = ledgerStatsByEvent[promo.eventName];
+            if ((finalEarned === 0 || promo.sales === 0) && ledgerStat) {
+                return {
+                    ...promo,
+                    earned: ledgerStat.earned,
+                    sales: ledgerStat.sales
+                };
+            }
+            
+            return {
+                ...promo,
+                earned: finalEarned
+            };
+        });
+    }, [activePromos, ledgerStatsByEvent]);
 
     const currentBalance = financials?.pendingBalance || 0;
     const totalEarned = financials?.netRevenue || 0;
@@ -132,11 +186,7 @@ const PromotionsContent: React.FC<{ user: User, onUserUpdate: () => void }> = ({
         if (!promoToStop) return;
         try {
             await api.stopPromotion(user.id, promoToStop.eventId);
-            
-            // Optimistic Update: Remove from UI immediately
             setDeletedEventIds(prev => [...prev, promoToStop.eventId]);
-            
-            // Trigger background refresh (even if it returns stale data, our local filter handles it)
             onUserUpdate(); 
         } catch (error) {
             console.error("Failed to stop promotion", error);
@@ -177,13 +227,13 @@ const PromotionsContent: React.FC<{ user: User, onUserUpdate: () => void }> = ({
                 </div>
                 <div className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6">
                     <h3 className="text-sm font-medium text-neutral-400 mb-2">Next Payout</h3>
-                    <p className="text-3xl font-bold text-white">July 1, 2025</p>
+                    <p className="text-3xl font-bold text-white">TBD</p>
                 </div>
             </div>
 
             {/* Sub-tabs */}
             <div className="flex items-center space-x-2 mb-8">
-                <SubTabButton tabName="active" label={`Active Promotions (${activePromos.length})`} />
+                <SubTabButton tabName="active" label={`Active Promotions (${displayedPromos.length})`} />
                 <SubTabButton tabName="transactions" label="Transaction History" />
                 <SubTabButton tabName="payouts" label={`Payout History (${user.payouts.length})`} />
             </div>
@@ -191,23 +241,15 @@ const PromotionsContent: React.FC<{ user: User, onUserUpdate: () => void }> = ({
             {/* Content */}
             {activeSubTab === 'active' && (
                 <div className="space-y-6">
-                    {activePromos.length > 0 ? (
-                        activePromos.map(promo => {
-                             // Use enriched data from promoStats, fallback to map if needed
+                    {displayedPromos.length > 0 ? (
+                        displayedPromos.map(promo => {
                              const event = eventsMap.get(promo.eventId);
-                             // REPLACEMENT LOGIC:
-                             // 1. Try to find the competition specifically linked to this promotion
-                             // 2. If not found, find the first one that is either ACTIVE or SETUP
                              let competition = null;
                              if (event?.competitions) {
-                                 // Check if the promo object has a specific competition ID (handle both camel and snake case if unsure of API)
                                  const linkedCompId = (promo as any).competitionId || (promo as any).competition_id;
-                                 
                                  if (linkedCompId) {
                                      competition = event.competitions.find(c => c.id === linkedCompId);
                                  }
-                                 
-                                 // Fallback: If we still don't have one, grab the first valid one
                                  if (!competition) {
                                      competition = event.competitions.find(c => c.status === 'ACTIVE' || c.status === 'SETUP');
                                  }

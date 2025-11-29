@@ -86,7 +86,12 @@ const AppContent: React.FC = () => {
                     // Check for pending checkout
                     const pendingEventId = sessionStorage.getItem('pendingCheckoutEventId');
                     if (pendingEventId) {
-                        navigate(`/event/${pendingEventId}`);
+                        const pendingPromo = sessionStorage.getItem('pendingCheckoutPromoCode');
+                        if (pendingPromo) {
+                            navigate(`/event/${pendingEventId}?promo=${pendingPromo}`);
+                        } else {
+                            navigate(`/event/${pendingEventId}`);
+                        }
                     }
                 } catch (e) {
                     // Login failed, assumes user needs registration.
@@ -99,7 +104,12 @@ const AppContent: React.FC = () => {
                         // Check for pending checkout
                         const pendingEventId = sessionStorage.getItem('pendingCheckoutEventId');
                         if (pendingEventId) {
-                            navigate(`/event/${pendingEventId}`);
+                            const pendingPromo = sessionStorage.getItem('pendingCheckoutPromoCode');
+                            if (pendingPromo) {
+                                navigate(`/event/${pendingEventId}?promo=${pendingPromo}`);
+                            } else {
+                                navigate(`/event/${pendingEventId}`);
+                            }
                         }
                     } catch (regError) {
                         console.error("Auto-registration failed", regError);
