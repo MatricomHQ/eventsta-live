@@ -78,6 +78,11 @@ const PromotionsContent: React.FC<{ user: User, onUserUpdate: () => void }> = ({
     const [financials, setFinancials] = useState<HostFinancials | null>(null);
     const [ledger, setLedger] = useState<LedgerEntry[]>([]);
 
+    // ADD THIS EFFECT: Force a refresh of user data (including promoStats) on mount
+    useEffect(() => {
+        onUserUpdate();
+    }, []); // Empty dependency array ensures this runs once when the tab opens
+
     useEffect(() => {
         const loadFinancials = async () => {
             try {
@@ -190,7 +195,23 @@ const PromotionsContent: React.FC<{ user: User, onUserUpdate: () => void }> = ({
                         activePromos.map(promo => {
                              // Use enriched data from promoStats, fallback to map if needed
                              const event = eventsMap.get(promo.eventId);
-                             const competition = event?.competitions?.find(c => c.status === 'ACTIVE');
+                             // REPLACEMENT LOGIC:
+                             // 1. Try to find the competition specifically linked to this promotion
+                             // 2. If not found, find the first one that is either ACTIVE or SETUP
+                             let competition = null;
+                             if (event?.competitions) {
+                                 // Check if the promo object has a specific competition ID (handle both camel and snake case if unsure of API)
+                                 const linkedCompId = (promo as any).competitionId || (promo as any).competition_id;
+                                 
+                                 if (linkedCompId) {
+                                     competition = event.competitions.find(c => c.id === linkedCompId);
+                                 }
+                                 
+                                 // Fallback: If we still don't have one, grab the first valid one
+                                 if (!competition) {
+                                     competition = event.competitions.find(c => c.status === 'ACTIVE' || c.status === 'SETUP');
+                                 }
+                             }
 
                             return (
                                 <div key={promo.eventId} className="bg-neutral-900 border border-neutral-800 rounded-2xl p-6">

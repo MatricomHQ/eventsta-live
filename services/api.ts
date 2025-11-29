@@ -316,20 +316,26 @@ export const getUserProfile = async (): Promise<User> => {
                  finalLink = `${window.location.origin}/#/event/${slug}?promo=${promoCode}`;
             }
 
+            // Commission & Earnings Calculation Fix
+            // The backend may send 0 for commission_rate or earned_amount if data joins are incomplete.
+            // We implement a fallback calculation here.
+            const commissionRate = raw.commission_rate || event?.commission || 0;
+            const salesVolume = raw.sales_volume || raw.sales || 0;
+            let earnedAmount = typeof raw.earned_amount === 'number' ? raw.earned_amount : (raw.earned || 0);
+
+            // Fallback: If earnings are 0 but volume and commission rate exist, calculate manually.
+            if (earnedAmount === 0 && salesVolume > 0 && commissionRate > 0) {
+                earnedAmount = salesVolume * (commissionRate / 100);
+            }
+
             return {
                 eventId: evtId,
                 eventName: raw.event_title || raw.eventName || event?.title || 'Unknown Event',
                 promoLink: finalLink,
                 clicks: raw.clicks || 0, 
                 sales: raw.sales_count || raw.sales || 0,
-                commissionPct: raw.commission_rate || event?.commission || 0, 
-                earned: typeof raw.earned_amount === 'number' 
-                    ? raw.earned_amount 
-                    : typeof raw.earned === 'number' 
-                        ? raw.earned 
-                        : (raw.sales_volume && event?.commission) 
-                            ? (raw.sales_volume * (event.commission / 100)) 
-                            : 0,
+                commissionPct: commissionRate, 
+                earned: earnedAmount,
                 status: raw.status || 'active'
             };
         });
@@ -880,10 +886,31 @@ export const getCompetitionLeaderboard = async (eventId: string): Promise<Leader
     console.info(`[ACTION] getCompetitionLeaderboard: ${eventId}`);
     const rawData = await request<any[]>(`/competitions/${eventId}/leaderboard`);
     
+    // Identify missing user names
+    const missingNameIds = rawData
+        .filter(item => !item.user_name && !item.name && item.user_id)
+        .map(item => item.user_id);
+    
+    let userMap: Record<string, string> = {};
+    
+    // If any names are missing, fetch them efficiently in one batch
+    if (missingNameIds.length > 0) {
+        try {
+            console.debug(`[Leaderboard] Fetching ${missingNameIds.length} missing user names...`);
+            const uniqueIds = Array.from(new Set(missingNameIds));
+            const users = await getUsersByIds(uniqueIds);
+            users.forEach(u => {
+                userMap[u.id] = u.name;
+            });
+        } catch (e) {
+            console.warn("[Leaderboard] Failed to fetch missing user names", e);
+        }
+    }
+
     // MAP: Backend snake_case -> Frontend camelCase (LeaderboardEntry)
     return rawData.map(item => ({
         userId: item.user_id,
-        userName: item.user_name || item.name || 'Unknown User', // Fallback for name
+        userName: item.user_name || item.name || userMap[item.user_id] || 'Unknown User', // Prioritize backend name, then fetched name
         salesCount: item.sales_count || 0,
         salesValue: item.sales_volume || 0,
         lastSaleDate: item.last_sale_date 
