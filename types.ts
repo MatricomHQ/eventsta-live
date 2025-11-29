@@ -116,7 +116,8 @@ export interface Competition {
     competitorIds: string[]; // List of User IDs
     startDate: string; // ISO format
     cutoffDate: string; // ISO format
-    promoDiscountPercent?: number;
+    promoDiscountPercent?: number; // Discount for the buyer
+    commissionPercent?: number;    // NEW: Commission % for the competitor (Overrides event default)
     winnerIds?: string[]; // Array of user IDs, ordered by rank
     forms?: CompetitionForm[]; // DEPRECATED: Forms are now on Event level, kept for type safety during migration
 }

@@ -369,6 +369,7 @@ const CompetitionEditorModal: React.FC<{
         startDate: competition?.startDate || new Date().toISOString(),
         cutoffDate: competition?.cutoffDate || event.date,
         promoDiscountPercent: competition?.promoDiscountPercent ?? 10,
+        commissionPercent: competition?.commissionPercent ?? 10, // NEW
         sectionIds: competition?.sectionIds || (defaultSectionId ? [defaultSectionId] : []),
         competitorIds: competition?.competitorIds || [],
     }), [competition, event.date, defaultSectionId]);
@@ -418,16 +419,24 @@ const CompetitionEditorModal: React.FC<{
                         <label className="block text-sm font-medium text-neutral-300 mb-2">Description</label>
                         <textarea value={compData.description} onChange={e => setCompData({...compData, description: e.target.value})} rows={3} className="w-full p-4 bg-neutral-800 border border-neutral-700 rounded-lg text-white resize-none" />
                     </div>
-                     <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                     <div>
+                        <label className="block text-sm font-medium text-neutral-300 mb-2">Sales Tracking Cutoff</label>
+                        <input type="datetime-local" value={dateTimeLocalValue(compData.cutoffDate)} onChange={e => setCompData({...compData, cutoffDate: e.target.value})} className="w-full h-12 px-4 bg-neutral-800 border border-neutral-700 rounded-lg text-white" />
+                    </div>
+
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                         <div>
-                            <label className="block text-sm font-medium text-neutral-300 mb-2">Sales Tracking Cutoff</label>
-                            <input type="datetime-local" value={dateTimeLocalValue(compData.cutoffDate)} onChange={e => setCompData({...compData, cutoffDate: e.target.value})} className="w-full h-12 px-4 bg-neutral-800 border border-neutral-700 rounded-lg text-white" />
+                            <label className="block text-sm font-medium text-neutral-300 mb-2">Buyer Discount (%)</label>
+                            <input type="number" value={compData.promoDiscountPercent} onChange={e => setCompData({...compData, promoDiscountPercent: parseInt(e.target.value) || 0})} min="0" max="100" className="w-full h-12 px-4 bg-neutral-800 border border-neutral-700 rounded-lg text-white" />
+                            <p className="text-[10px] text-neutral-500 mt-1">Discount applied to fans using the link.</p>
                         </div>
                         <div>
-                            <label className="block text-sm font-medium text-neutral-300 mb-2">Promo Discount (%) for DJs</label>
-                            <input type="number" value={compData.promoDiscountPercent} onChange={e => setCompData({...compData, promoDiscountPercent: parseInt(e.target.value) || 0})} min="0" max="100" className="w-full h-12 px-4 bg-neutral-800 border border-neutral-700 rounded-lg text-white" />
+                            <label className="block text-sm font-medium text-neutral-300 mb-2">Competitor Commission (%)</label>
+                            <input type="number" value={compData.commissionPercent} onChange={e => setCompData({...compData, commissionPercent: parseInt(e.target.value) || 0})} min="0" max="100" className="w-full h-12 px-4 bg-neutral-800 border border-neutral-700 rounded-lg text-white" />
+                            <p className="text-[10px] text-neutral-500 mt-1">Overrides the default event commission.</p>
                         </div>
                     </div>
+
                      <div>
                         <label className="block text-sm font-medium text-neutral-300 mb-2">Competition Sections</label>
                         <p className="text-xs text-neutral-500 mb-3">Select which venue sections this competition applies to.</p>

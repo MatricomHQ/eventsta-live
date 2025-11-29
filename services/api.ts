@@ -710,6 +710,7 @@ function mapApiEventToFrontend(apiEvent: any): Event {
         startDate: c.startDate || c.start_date || new Date().toISOString(),
         cutoffDate: c.cutoffDate || c.cutoff_date || new Date().toISOString(),
         promoDiscountPercent: c.promoDiscountPercent || c.promo_discount_percent || 0,
+        commissionPercent: c.commissionPercent || c.commission_percent || 0, // NEW: map new field
         winnerIds: c.winnerIds || c.winner_ids || []
     }));
 

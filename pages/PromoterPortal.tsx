@@ -33,6 +33,34 @@ const PromoterPortal: React.FC = () => {
     );
 };
 
+const TransactionRow: React.FC<{ entry: LedgerEntry }> = ({ entry }) => (
+    <tr className="border-b border-neutral-800 hover:bg-neutral-800/30">
+        <td className="px-6 py-4 text-neutral-400 text-sm">
+            {new Date(entry.createdAt).toLocaleDateString()}
+        </td>
+        <td className="px-6 py-4">
+            <div className="font-medium text-white">{entry.description}</div>
+            <div className="text-xs text-neutral-500 font-mono mt-1">{entry.referenceId}</div>
+            <span className={`mt-1 inline-block text-[10px] font-bold px-1.5 py-0.5 rounded border uppercase ${
+                entry.type === 'COMMISSION' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' : 
+                entry.type === 'PAYOUT' ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' : 
+                entry.type === 'CLAWBACK' ? 'bg-red-500/10 text-red-400 border-red-500/20' : 
+                'bg-neutral-800 text-neutral-500 border-neutral-700'
+            }`}>
+                {entry.type}
+            </span>
+        </td>
+        <td className={`px-6 py-4 font-mono font-bold text-right ${entry.amount >= 0 ? 'text-green-400' : 'text-red-400'}`}>
+            {entry.amount >= 0 ? '+' : ''}{entry.amount.toFixed(2)}
+        </td>
+        <td className="px-6 py-4 text-center">
+            <span className="text-xs bg-neutral-800 text-neutral-400 px-2 py-1 rounded">
+                {entry.status}
+            </span>
+        </td>
+    </tr>
+);
+
 const PromotionsContent: React.FC<{ user: User, onUserUpdate: () => void }> = ({ user, onUserUpdate }) => {
     const [activeSubTab, setActiveSubTab] = useState('active');
     const [promoToStop, setPromoToStop] = useState<PromoStat | null>(null);
@@ -129,34 +157,6 @@ const PromotionsContent: React.FC<{ user: User, onUserUpdate: () => void }> = ({
         >
             {label}
         </button>
-    );
-
-    const TransactionRow = ({ entry }: { entry: LedgerEntry }) => (
-        <tr className="border-b border-neutral-800 hover:bg-neutral-800/30">
-            <td className="px-6 py-4 text-neutral-400 text-sm">
-                {new Date(entry.createdAt).toLocaleDateString()}
-            </td>
-            <td className="px-6 py-4">
-                <div className="font-medium text-white">{entry.description}</div>
-                <div className="text-xs text-neutral-500 font-mono mt-1">{entry.referenceId}</div>
-                <span className={`mt-1 inline-block text-[10px] font-bold px-1.5 py-0.5 rounded border uppercase ${
-                    entry.type === 'COMMISSION' ? 'bg-blue-500/10 text-blue-400 border-blue-500/20' : 
-                    entry.type === 'PAYOUT' ? 'bg-yellow-500/10 text-yellow-400 border-yellow-500/20' : 
-                    entry.type === 'CLAWBACK' ? 'bg-red-500/10 text-red-400 border-red-500/20' : 
-                    'bg-neutral-800 text-neutral-500 border-neutral-700'
-                }`}>
-                    {entry.type}
-                </span>
-            </td>
-            <td className={`px-6 py-4 font-mono font-bold text-right ${entry.amount >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                {entry.amount >= 0 ? '+' : ''}{entry.amount.toFixed(2)}
-            </td>
-            <td className="px-6 py-4 text-center">
-                <span className="text-xs bg-neutral-800 text-neutral-400 px-2 py-1 rounded">
-                    {entry.status}
-                </span>
-            </td>
-        </tr>
     );
 
     return (
