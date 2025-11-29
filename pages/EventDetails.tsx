@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { useParams, Link, useLocation } from 'react-router-dom';
 import * as api from '../services/api';
@@ -77,7 +76,8 @@ const EventDetails: React.FC = () => {
   
   const hasActiveCompetition = useMemo(() => {
     if (!event || !event.competitions || event.competitions.length === 0) return false;
-    return event.competitions.some(c => c.status === 'ACTIVE' && c.competitorIds.length > 0);
+    // An active competition is one that can be joined (i.e., not completed or cancelled).
+    return event.competitions.some(c => c.status === 'ACTIVE' || c.status === 'SETUP');
   }, [event]);
 
   useEffect(() => {
@@ -894,19 +894,9 @@ const EventDetails: React.FC = () => {
                             {event.type === 'ticketed' ? 'Checkout' : 'Donate Now'}
                         </button>
                         <div className="border-t border-neutral-800 mt-6 pt-6">
-                            {isCompetitionEvent && !isCompetitor && !isOwner && !isEventEnded && (
-                                <button onClick={handleJoinCompetition} disabled={isJoiningCompetition} className="w-full h-12 px-6 bg-green-500/20 text-green-300 text-sm font-semibold rounded-full hover:bg-green-500/30 hover:text-green-200 transition-colors flex items-center justify-center space-x-2 mb-4">
-                                    <span>Join "{event.competitions?.find(c => c.status === 'ACTIVE')?.name || event.competitions?.[0].name}"</span>
-                                </button>
-                            )}
-                            {!isPromoting && !isEventEnded ? (
-                                 <button onClick={handlePromote} disabled={isPromotingLoading || isOwner} className="w-full h-12 px-6 bg-purple-500/20 text-purple-300 text-sm font-semibold rounded-full hover:bg-purple-500/30 hover:text-purple-200 transition-colors flex items-center justify-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed">
-                                    <MegaphoneIcon className="w-4 h-4" />
-                                    <span>
-                                        {event.defaultPromoDiscount > 0 
-                                            ? `Promote: Earn ${event.commission}% + Give ${event.defaultPromoDiscount}% Off`
-                                            : `Promote & Earn ${event.commission}%`}
-                                    </span>
+                            {hasActiveCompetition && !isCompetitor && !isOwner && !isEventEnded ? (
+                                <button onClick={handleJoinCompetition} disabled={isJoiningCompetition} className="w-full h-12 px-6 bg-green-500/20 text-green-300 text-sm font-semibold rounded-full hover:bg-green-500/30 hover:text-green-200 transition-colors flex items-center justify-center space-x-2">
+                                    <span>Join "{event.competitions?.find(c => c.status === 'ACTIVE' || c.status === 'SETUP')?.name || event.competitions?.[0].name}"</span>
                                 </button>
                             ) : isPromoting ? (
                                 <div className="text-center">
@@ -919,6 +909,15 @@ const EventDetails: React.FC = () => {
                                     </div>
                                      <Link to="/promotions" className="text-xs text-neutral-400 hover:text-white mt-3 inline-block">Manage promotions &rarr;</Link>
                                 </div>
+                            ) : !isEventEnded && !isOwner ? (
+                                <button onClick={handlePromote} disabled={isPromotingLoading} className="w-full h-12 px-6 bg-purple-500/20 text-purple-300 text-sm font-semibold rounded-full hover:bg-purple-500/30 hover:text-purple-200 transition-colors flex items-center justify-center space-x-2 disabled:opacity-50 disabled:cursor-not-allowed">
+                                    <MegaphoneIcon className="w-4 h-4" />
+                                    <span>
+                                        {event.defaultPromoDiscount > 0 
+                                            ? `Promote: Earn ${event.commission}% + Give ${event.defaultPromoDiscount}% Off`
+                                            : `Promote & Earn ${event.commission}%`}
+                                    </span>
+                                </button>
                             ) : null}
                        </div>
                     </div>

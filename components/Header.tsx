@@ -1,4 +1,3 @@
-
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
@@ -57,10 +56,7 @@ const Header: React.FC = () => {
             </Link>
             <div className="hidden md:flex items-center space-x-8">
               <Link to="/" className="text-neutral-400 hover:text-white transition-colors duration-200">Discover</Link>
-              {user && user.purchasedTickets && user.purchasedTickets.length > 0 && (
-                <Link to="/my-tickets" className="text-neutral-400 hover:text-white transition-colors duration-200">My Tickets</Link>
-              )}
-              <button onClick={() => handleNavigation('/events')} className="text-neutral-400 hover:text-white transition-colors duration-200">Events</button>
+              <button onClick={() => handleNavigation('/events')} className="text-neutral-400 hover:text-white transition-colors duration-200">Host</button>
               <button onClick={() => handleNavigation('/promotions')} className="text-neutral-400 hover:text-white transition-colors duration-200">Promote</button>
             </div>
           </div>
@@ -96,7 +92,7 @@ const Header: React.FC = () => {
                     <TicketIcon className="w-4 h-4 mr-3" /> My Tickets
                   </button>
                   <button onClick={() => handleNavigation('/events')} className="flex items-center w-full px-4 py-2 rounded-lg text-sm text-neutral-300 hover:bg-neutral-800 hover:text-white transition-colors">
-                    <CalendarPlusIcon className="w-4 h-4 mr-3" /> Events
+                    <CalendarPlusIcon className="w-4 h-4 mr-3" /> Host Dashboard
                   </button>
                   <button onClick={() => handleNavigation('/promotions')} className="flex items-center w-full px-4 py-2 rounded-lg text-sm text-neutral-300 hover:bg-neutral-800 hover:text-white transition-colors">
                     <MegaphoneIcon className="w-4 h-4 mr-3" /> Promotions
