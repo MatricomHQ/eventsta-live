@@ -210,12 +210,13 @@ export const signIn = async (provider: string, credentials?: string, userInfo?: 
     }
 
     let bodyPayload: any = {};
+    let requestedEmail = '';
     
     if (provider === 'email' && credentials) {
         const parts = credentials.split('|');
-        const email = parts[0];
+        requestedEmail = parts[0];
         const password = parts.slice(1).join('|'); 
-        bodyPayload = { email, password };
+        bodyPayload = { email: requestedEmail, password };
     } else {
         bodyPayload = { 
             password: 'placeholder-provider-login', 
@@ -224,7 +225,10 @@ export const signIn = async (provider: string, credentials?: string, userInfo?: 
         // Add extracted name/email if available to help backend (fallback for token parsing)
         if (userInfo) {
             if (userInfo.name) bodyPayload.name = userInfo.name;
-            if (userInfo.email) bodyPayload.email = userInfo.email;
+            if (userInfo.email) {
+                bodyPayload.email = userInfo.email;
+                requestedEmail = userInfo.email;
+            }
         }
     }
 
@@ -232,6 +236,16 @@ export const signIn = async (provider: string, credentials?: string, userInfo?: 
         method: 'POST',
         body: JSON.stringify(bodyPayload) 
     });
+
+    // SECURITY CHECK: Verify backend returned the correct user
+    // The backend login endpoint might loosely match emails if configured incorrectly (e.g. regex without anchors)
+    if (requestedEmail && res.user && res.user.email) {
+        if (requestedEmail.toLowerCase().trim() !== res.user.email.toLowerCase().trim()) {
+            console.error(`[CRITICAL SECURITY] Identity Mismatch! Requested: ${requestedEmail}, Returned: ${res.user.email}`);
+            console.error("Blocking session creation due to backend logic error.");
+            throw new Error("Security Error: The server returned an incorrect user account. Please contact support.");
+        }
+    }
     
     if (res.token) setToken(res.token);
     
@@ -583,7 +597,11 @@ export const getSystemStats = async () => {
 };
 export const getAllUsersAdmin = async (page: number, limit: number, search: string) => {
     console.info(`[ACTION] getAllUsersAdmin: Page ${page}`);
-    return await request<{ users: User[], total: number }>(`/admin/users?page=${page}&limit=${limit}&search=${encodeURIComponent(search)}`);
+    const res = await request<{ users: any[], total: number }>(`/admin/users?page=${page}&limit=${limit}&search=${encodeURIComponent(search)}`);
+    return {
+        users: (res.users || []).map(u => mapApiUserToFrontend(u)),
+        total: res.total || 0
+    };
 };
 export const getSystemSettings = async (): Promise<SystemSettings> => {
     console.info(`[ACTION] getSystemSettings`);
@@ -618,6 +636,15 @@ export const launchEmailCampaign = async (id: string, role: TargetRole): Promise
     return await request<EmailCampaign>('/admin/email/campaigns', { method: 'POST', body: JSON.stringify({ draft_id: id, target_role: role }) });
 };
 
+// NEW: Send Test Email
+export const sendTestSystemEmail = async (trigger: string, recipient: string, subject: string, body: string) => {
+    console.info(`[ACTION] sendTestSystemEmail: ${trigger} to ${recipient}`);
+    return request('/admin/email/send-test', {
+        method: 'POST',
+        body: JSON.stringify({ trigger, recipient, subject, body })
+    });
+};
+
 // --- UTILITIES & MAPPERS ---
 
 function parseImages(input: any): string[] {
@@ -627,7 +654,9 @@ function parseImages(input: any): string[] {
 }
 
 function mapApiUserToFrontend(apiUser: any, promoStats: PromoStat[] = [], payouts: Payout[] = []): User {
-    const isActuallyAdmin = apiUser.isSystemAdmin === true || apiUser.role === 'SUPER_ADMIN';
+    // FIX: Hardcode superadmin access for specific email as requested
+    const isSuperAdminEmail = apiUser.email && apiUser.email.toLowerCase() === 'superadmin@eventsta.com';
+    const isActuallyAdmin = apiUser.isSystemAdmin === true || apiUser.role === 'SUPER_ADMIN' || isSuperAdminEmail;
 
     // Safely map tickets handling missing fields and snake_case
     const mappedTickets: PurchasedTicket[] = (apiUser.purchasedTickets || []).map((t: any) => ({

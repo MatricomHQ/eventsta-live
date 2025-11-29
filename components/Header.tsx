@@ -1,3 +1,4 @@
+
 import React, { useState, useEffect, useRef } from 'react';
 import { Link, useNavigate, useLocation } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
@@ -80,7 +81,7 @@ const Header: React.FC = () => {
                 <div className="p-2">
                   {user?.isSystemAdmin && (
                      <button onClick={() => handleNavigation('/system-admin')} className="flex items-center w-full px-4 py-2 rounded-lg text-sm text-purple-300 bg-purple-500/10 hover:bg-purple-500/20 transition-colors mb-2 border border-purple-500/20">
-                      <ShieldIcon className="w-4 h-4 mr-3" /> System Admin
+                      <ShieldIcon className="w-4 h-4 mr-3" /> Master Admin Panel
                     </button>
                   )}
                   {user?.isArtist && (

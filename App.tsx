@@ -131,9 +131,12 @@ const AppContent: React.FC = () => {
     location.pathname.startsWith('/profile/') ||
     location.pathname === '/';
   
-  // System admin page has its own layout structure
-  const isSystemAdmin = location.pathname.startsWith('/system-admin');
+  // System admin route has its own layout structure
+  const isSystemAdminRoute = location.pathname.startsWith('/system-admin');
   
+  // Should we show maintenance banner?
+  // Hide if: Not maintenance mode OR User is on System Admin Route OR User is a System Admin
+  const showMaintenanceBanner = isMaintenanceMode && !isSystemAdminRoute && !user?.isSystemAdmin;
 
   // For the event/host/profile details pages, the background is transparent to allow their custom blurred background to show.
   // For all other pages, a default dark background is applied.
@@ -141,20 +144,20 @@ const AppContent: React.FC = () => {
 
   return (
     <div className={`min-h-screen w-full ${backgroundClass}`}>
-      {isMaintenanceMode && !isSystemAdmin && (
+      {showMaintenanceBanner && (
           <div className="fixed top-0 left-0 right-0 h-10 bg-yellow-500 text-black z-[100] flex items-center justify-center font-bold text-sm px-4">
               <ShieldIcon className="w-4 h-4 mr-2" />
               Maintenance Mode Active - Some features may be unavailable.
           </div>
       )}
       
-      {!isSystemAdmin && !isPublicForm && (
-          <div className={isMaintenanceMode ? "pt-10" : ""}>
+      {!isSystemAdminRoute && !isPublicForm && (
+          <div className={showMaintenanceBanner ? "pt-10" : ""}>
               <Header />
           </div>
       )}
       
-      <main className={(!isSystemAdmin && !isPublicForm) ? "pt-20" : ""}>
+      <main className={(!isSystemAdminRoute && !isPublicForm) ? "pt-20" : ""}>
         <Routes>
           <Route path="/" element={<Home />} />
           <Route path="/event/:id/admin/:tab" element={<EventAdmin />} />

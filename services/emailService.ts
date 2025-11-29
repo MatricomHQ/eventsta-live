@@ -102,12 +102,5 @@ export const sendEventReminder = async (email: string, eventName: string, eventD
 
 // Exposed for Admin "Send Test" functionality
 export const sendTestSystemEmail = async (trigger: SystemEmailTrigger, to: string, subject: string, body: string) => {
-    // Mock fetching settings for the test log
-    const settings = await api.getSystemSettings();
-    console.group(`📧 Sending TEST Email: [${trigger}] ${subject}`);
-    console.log(`From: ${settings.platformName} <noreply@${settings.platformName.toLowerCase().replace(/\s+/g, '')}.com>`);
-    console.log(`To: ${to}`);
-    console.log('%c[HTML Content]', LOG_STYLE);
-    console.log(body);
-    console.groupEnd();
+    return api.sendTestSystemEmail(trigger, to, subject, body);
 }

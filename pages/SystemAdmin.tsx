@@ -243,8 +243,8 @@ const StatCard: React.FC<{ label: string, value: string, icon: any, color: 'blue
                 <p className="text-neutral-400 text-xs font-bold uppercase tracking-wider mb-1">{label}</p>
                 <p className="text-2xl font-bold text-white">{value}</p>
             </div>
-            <div className={`p-3 rounded-xl ${colors[color]}`}>
-                <Icon className="w-6 h-6" />
+            <div className="p-3 rounded-xl">
+                <Icon className={`w-6 h-6 ${colors[color]}`} />
             </div>
         </div>
     );
@@ -281,10 +281,15 @@ const AdminUserManagement: React.FC = () => {
 
     const fetchUsers = useCallback(async () => {
         setLoading(true);
-        const res = await api.getAllUsersAdmin(page, 20, search);
-        setUsers(res.users);
-        setTotal(res.total);
-        setLoading(false);
+        try {
+            const res = await api.getAllUsersAdmin(page, 20, search);
+            setUsers(res.users);
+            setTotal(res.total);
+        } catch (error) {
+            console.error("Failed to load users:", error);
+        } finally {
+            setLoading(false);
+        }
     }, [page, search]);
 
     useEffect(() => {
@@ -341,7 +346,7 @@ const AdminUserManagement: React.FC = () => {
                                     {user.isSystemAdmin ? <span className="text-purple-400 font-bold">Admin</span> : 'User'}
                                 </td>
                                 <td className="px-6 py-4">
-                                    {user.managedHostIds.length}
+                                    {user.managedHostIds?.length || 0}
                                 </td>
                                 <td className="px-6 py-4 text-center">
                                     <span className={`inline-block px-2 py-1 rounded-full text-xs font-bold ${user.isDisabled ? 'bg-red-500/10 text-red-500' : 'bg-green-500/10 text-green-500'}`}>
@@ -639,13 +644,20 @@ const AdminSystemEmailsManager: React.FC = () => {
 
     useEffect(() => {
         const loadTemplates = async () => {
-            const data = await api.getSystemEmailTemplates();
-            setTemplates(data);
-            if (data.length > 0) {
-                // Set default but ensure empty string if none (though API should return some)
-                setSelectedTrigger(data[0].trigger);
+            try {
+                const data = await api.getSystemEmailTemplates();
+                // FIX: Ensure it's an array to prevent crash
+                const safeData = Array.isArray(data) ? data : [];
+                setTemplates(safeData);
+                if (safeData.length > 0) {
+                    setSelectedTrigger(safeData[0].trigger);
+                }
+            } catch (e) {
+                console.error("Failed to load email templates", e);
+                setTemplates([]);
+            } finally {
+                setLoading(false);
             }
-            setLoading(false);
         };
         loadTemplates();
     }, []);
@@ -672,7 +684,7 @@ const AdminSystemEmailsManager: React.FC = () => {
             setSaveSuccess(true);
             setTimeout(() => setSaveSuccess(false), 2000);
         } catch (e) {
-            alert("Failed to save template.");
+            alert("Failed to save template. Backend route may be missing.");
         } finally {
             setIsSaving(false);
         }
@@ -682,7 +694,7 @@ const AdminSystemEmailsManager: React.FC = () => {
         if (!selectedTrigger || !testEmail) return;
         try {
             await emailService.sendTestSystemEmail(selectedTrigger as SystemEmailTrigger, testEmail, formData.subject, formData.body);
-            alert(`Test email sent to ${testEmail} (Check Console)`);
+            alert(`Test email request sent to server.`);
             setIsTestModalOpen(false);
         } catch (e) {
             alert("Failed to send test email.");
