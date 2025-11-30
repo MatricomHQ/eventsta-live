@@ -1,22 +1,9 @@
 
-
-
-
-
-
-
-
-
-
-
-
-
 import React, { useState, useEffect, useMemo, useCallback, useRef } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import Modal from './Modal';
 import { useAuth } from '../contexts/AuthContext';
 import * as api from '../services/api';
-import { generateEventDescription, generateEventImage } from '../services/geminiService';
 import { WandSparklesIcon, TrashIcon, CheckCircleIcon, ArrowRightIcon, TicketIcon, DollarSignIcon, XIcon, SaveIcon, ShieldCheckIcon, UploadCloudIcon } from './Icons';
 import { Event, TicketOption, Host } from '../types';
 
@@ -54,7 +41,7 @@ const HostEventFlow: React.FC<HostEventFlowProps> = ({ isOpen, onClose, onEventC
   const [eventData, setEventData] = useState(initialEventData);
   const [isSubmitting, setIsSubmitting] = useState(false);
 
-  const [isGeneratingImage, setIsGeneratingImage] = useState(false);
+  // Removed isGeneratingImage state, will manage upload state within Step5Image
 
   const handleClose = () => {
     onClose();
@@ -152,7 +139,7 @@ const HostEventFlow: React.FC<HostEventFlowProps> = ({ isOpen, onClose, onEventC
           case 2: return <Step2Details data={eventData} onChange={handleDataChange} />;
           case 3: return <Step3Location data={eventData} onChange={handleDataChange} />;
           case 4: return <Step4Pricing data={eventData} onChange={handleDataChange} />;
-          case 5: return <Step5Image data={eventData} onChange={handleDataChange} isGenerating={isGeneratingImage} setGenerating={setIsGeneratingImage} />;
+          case 5: return <Step5Image data={eventData} onChange={handleDataChange} />;
           default: return null;
       }
   };
@@ -468,16 +455,15 @@ const Step4Pricing = ({ data, onChange }: any) => {
 };
 
 // Step 5 Component
-const Step5Image = ({ data, onChange, isGenerating, setGenerating }: any) => {
+const Step5Image = ({ data, onChange }: any) => {
     const fileInputRef = useRef<HTMLInputElement>(null);
-    const [uploadProgress, setUploadProgress] = useState(0);
+    const [isUploading, setIsUploading] = useState(false);
 
     const handleUploadFile = async (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
         if (!file) return;
 
-        setGenerating(true); // Reusing loading state
-        setUploadProgress(10);
+        setIsUploading(true);
         
         try {
             const url = await api.uploadFile(file);
@@ -486,63 +472,27 @@ const Step5Image = ({ data, onChange, isGenerating, setGenerating }: any) => {
             console.error("Upload failed", error);
             alert("Failed to upload image. Please try again.");
         } finally {
-            setGenerating(false);
-            setUploadProgress(0);
+            setIsUploading(false);
             if (fileInputRef.current) fileInputRef.current.value = ''; // Reset input
         }
     };
-
-    const generate = useCallback(async () => {
-        if (data.title) {
-            setGenerating(true);
-            try {
-                // Generate base64 string from AI
-                const base64Image = await generateEventImage(data.title, data.description || '');
-                
-                // Convert base64 to Blob for upload
-                const res = await fetch(base64Image);
-                const blob = await res.blob();
-                
-                // FIX: Give the blob a name so it isn't saved as '_blob' on server
-                const file = new File([blob], "generated_event_poster.png", { type: "image/png" });
-
-                // Upload to server to get a proper URL
-                const url = await api.uploadFile(file);
-                
-                onChange('imageUrls', [url]);
-            } catch (error) {
-                console.error("AI Generation/Upload failed", error);
-                alert("Failed to generate image.");
-            } finally {
-                setGenerating(false);
-            }
-        }
-    }, [data.title, data.description, onChange, setGenerating]);
     
-    // Generate image when step becomes active
-    useEffect(() => {
-        // Only generate if image isn't already set from a previous attempt
-        if (data.imageUrls[0] === '') {
-            generate();
-        }
-    }, [generate, data.imageUrls]);
-
     return (
         <div>
-             <p className="text-neutral-400 text-center mb-4 text-sm">We've generated a poster for you. Tap it to upload your own.</p>
+             <p className="text-neutral-400 text-center mb-4 text-sm">Upload a compelling image for your event poster. This will be the main visual.</p>
             <div 
-                onClick={() => fileInputRef.current?.click()} 
+                onClick={() => !isUploading && fileInputRef.current?.click()} 
                 className="relative aspect-video w-full bg-neutral-800 rounded-lg overflow-hidden cursor-pointer group border-2 border-dashed border-neutral-700 hover:border-purple-500 transition-colors"
             >
-                {isGenerating ? (
+                {isUploading ? (
                     <div className="flex items-center justify-center h-full">
                         <div className="w-8 h-8 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
                         <p className="ml-4 text-white">
-                            {uploadProgress > 0 ? "Uploading..." : "Generating AI Image..."}
+                            Uploading Image...
                         </p>
                     </div>
                 ) : (
-                    data.imageUrls[0] && (
+                    data.imageUrls[0] ? (
                         <img 
                             src={data.imageUrls[0]} 
                             alt="Event Preview" 
@@ -553,6 +503,11 @@ const Step5Image = ({ data, onChange, isGenerating, setGenerating }: any) => {
                                 console.error("Failed to load image at:", data.imageUrls[0]);
                             }}
                         />
+                    ) : (
+                        <div className="absolute inset-0 flex flex-col items-center justify-center text-neutral-500 group-hover:text-neutral-300 transition-colors">
+                            <UploadCloudIcon className="w-12 h-12 mb-2 opacity-50" />
+                            <span className="text-lg font-medium">Click to Upload Image</span>
+                        </div>
                     )
                 )}
                  <div className="absolute inset-0 bg-black/50 opacity-0 group-hover:opacity-100 transition-opacity flex items-center justify-center">
@@ -566,10 +521,7 @@ const Step5Image = ({ data, onChange, isGenerating, setGenerating }: any) => {
                     onChange={handleUploadFile} 
                 />
             </div>
-            <button onClick={generate} disabled={isGenerating} className="w-full mt-4 px-5 py-3 text-sm font-semibold text-purple-400 hover:text-white transition-colors bg-purple-500/10 hover:bg-purple-500/20 rounded-lg disabled:opacity-50 flex items-center justify-center space-x-2">
-                <WandSparklesIcon className="w-4 h-4"/>
-                <span>Re-generate with AI</span>
-            </button>
+            {/* Removed AI re-generate button */}
         </div>
     );
 };
